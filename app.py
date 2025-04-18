@@ -26,11 +26,12 @@ default_params = {
 
 # Create sliders in sidebar
 total_supply = st.sidebar.number_input(
-    "Total Supply (tokens)",
+    "Supply start (tokens)",
     min_value=100_000_000,
     max_value=10_000_000_000,
     value=default_params["total_supply"],
-    step=100_000_000
+    step=100_000_000,
+    help="Starting supply of the token"
 )
 
 team_allocation = st.sidebar.slider(
@@ -39,7 +40,8 @@ team_allocation = st.sidebar.slider(
     max_value=1.0,
     value=default_params["team_allocation_percentage"],
     step=0.01,
-    format="%.2f"
+    format="%.2f",
+    help="Percentage of total supply allocated to team/consultants, subject to vesting"
 )
 
 vesting_months = st.sidebar.slider(
@@ -47,7 +49,8 @@ vesting_months = st.sidebar.slider(
     min_value=12,
     max_value=60,
     value=default_params["vesting_months"],
-    step=1
+    step=1,
+    help="Number of months over which team tokens are gradually released"
 )
 
 t_burn = st.sidebar.slider(
@@ -55,7 +58,8 @@ t_burn = st.sidebar.slider(
     min_value=12,
     max_value=120,
     value=default_params["t_burn"],
-    step=1
+    step=1,
+    help="Month at which burn-based emissions begin (after fixed emissions period)"
 )
 
 burn_emission_factor = st.sidebar.slider(
@@ -63,15 +67,17 @@ burn_emission_factor = st.sidebar.slider(
     min_value=0.1,
     max_value=2.0,
     value=default_params["burn_emission_factor"],
-    step=0.1
+    step=0.1,
+    help="Multiplier that determines how much new tokens are emitted based on burn rate"
 )
 
 burn_coefficient = st.sidebar.slider(
     "Burn Coefficient",
     min_value=10000,
-    max_value=10000000,
+    max_value=1000000,
     value=default_params["burn_coefficient"],
-    step=10000
+    step=10000,
+    help="Coefficient that determines the base level of token burning"
 )
 
 simulation_months = st.sidebar.slider(
@@ -79,7 +85,8 @@ simulation_months = st.sidebar.slider(
     min_value=60,
     max_value=240,
     value=default_params["simulation_months"],
-    step=12
+    step=12,
+    help="Total number of months to simulate"
 )
 
 # Create model instance with current parameters
