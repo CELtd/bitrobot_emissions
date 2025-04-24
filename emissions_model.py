@@ -66,7 +66,11 @@ class BitRobotEmissionsModel:
         self.burn = np.zeros(simulation_months + 1)
         self.circulating_supply = np.zeros(simulation_months + 1)
         self.cumulative_emissions = np.zeros(simulation_months + 1)
-        self.net_supply_change = np.zeros(simulation_months + 1)  # New tracking array
+        self.net_supply_change = np.zeros(simulation_months + 1)
+        
+        # New arrays to track supply composition
+        self.cumulative_vested = np.zeros(simulation_months + 1)
+        self.cumulative_emitted = np.zeros(simulation_months + 1)
         
         # Define fixed emissions schedule
         self.fixed_emissions = np.zeros(simulation_months + 1)
@@ -140,6 +144,8 @@ class BitRobotEmissionsModel:
         self.circulating_supply[0] = self.vesting[0]
         self.cumulative_emissions[0] = 0
         self.net_supply_change[0] = 0
+        self.cumulative_vested[0] = self.vesting[0]
+        self.cumulative_emitted[0] = 0
         
         # Simulate each month
         for t in range(1, self.simulation_months + 1):
@@ -159,13 +165,9 @@ class BitRobotEmissionsModel:
             # Calculate net supply change (emissions + vesting - burn)
             self.net_supply_change[t] = self.emissions[t] + self.vesting[t] - self.burn[t]
             
-            # # Debug print for key months
-            # if t % 12 == 0 or t == self.t_burn:
-            #     print(f"\nMonth {t}:")
-            #     print(f"  Emissions: {self.emissions[t]:.2f}")
-            #     print(f"  Vesting: {self.vesting[t]:.2f}")
-            #     print(f"  Burn: {self.burn[t]:.2f}")
-            #     print(f"  Net Supply Change: {self.net_supply_change[t]:.2f}")
+            # Update cumulative amounts
+            self.cumulative_vested[t] = self.cumulative_vested[t-1] + self.vesting[t]
+            self.cumulative_emitted[t] = self.cumulative_emitted[t-1] + self.emissions[t]
             
             # Update circulating supply
             self.circulating_supply[t] = (
@@ -187,7 +189,9 @@ class BitRobotEmissionsModel:
             'Burn': self.burn,
             'Circulating Supply': self.circulating_supply,
             'Cumulative Emissions': self.cumulative_emissions,
-            'Net Supply Change': self.net_supply_change
+            'Net Supply Change': self.net_supply_change,
+            'Cumulative Vested': self.cumulative_vested,
+            'Cumulative Emitted': self.cumulative_emitted
         })
         return df
 
