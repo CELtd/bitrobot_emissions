@@ -280,6 +280,61 @@ with tab2:
 
     # Create Altair charts
     def create_chart(data, y_col, title, color):
+        # Special handling for emissions plot to show breakdown
+        if y_col == 'Emissions':
+            # Create a new DataFrame with the breakdown
+            df_breakdown = pd.DataFrame({
+                'Month': data['Month'],
+                'Mining Emissions': data['Emissions'],
+                'Vesting Emissions': data['Vesting'],
+                'Total Emissions': data['Emissions'] + data['Vesting']
+            })
+            
+            # Melt the data for the line chart
+            df_melted = pd.melt(
+                df_breakdown,
+                id_vars=['Month'],
+                value_vars=['Mining Emissions', 'Vesting Emissions', 'Total Emissions'],
+                var_name='Source',
+                value_name='Tokens'
+            )
+            
+            # Create the line chart with multiple lines
+            lines = alt.Chart(df_melted).mark_line().encode(
+                x=alt.X('Month:Q', title='Month'),
+                y=alt.Y('Tokens:Q', title='Tokens', axis=alt.Axis(format='~s')),
+                color=alt.Color('Source:N',
+                              scale=alt.Scale(domain=['Mining Emissions', 'Vesting Emissions', 'Total Emissions'],
+                                            range=['#2ca02c', '#1f77b4', '#ff7f0e']),
+                              legend=alt.Legend(orient='bottom')),
+                tooltip=['Month', 'Source', alt.Tooltip('Tokens', format='~s')]
+            )
+            
+            # Create the vertical rule for burn start
+            rule = alt.Chart(pd.DataFrame({'x': [t_burn]})).mark_rule(
+                color='red',
+                strokeDash=[5, 5]
+            ).encode(x='x:Q')
+            
+            # Layer the charts and configure
+            chart = (lines + rule).properties(
+                title=title,
+                width=400,
+                height=300
+            ).configure_axis(
+                labelFontSize=12,
+                titleFontSize=14
+            ).configure_title(
+                fontSize=16
+            ).configure_legend(
+                orient='bottom',
+                title=None,
+                labelFontSize=12
+            ).interactive()
+            
+            return chart
+        
+        # Default case for other charts
         # Create the main line chart
         line = alt.Chart(data).mark_line(color=color).encode(
             x=alt.X('Month:Q', title='Month'),
@@ -317,13 +372,20 @@ with tab2:
             value_name='Tokens'
         )
         
+        # Map the source names to more descriptive labels
+        df_stacked['Source'] = df_stacked['Source'].map({
+            'Cumulative Vested': 'Team Allocation (Vested)',
+            'Cumulative Emitted': 'Mining Emissions'
+        })
+        
         # Create the stacked area chart
         area = alt.Chart(df_stacked).mark_area().encode(
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Tokens:Q', title='Tokens', axis=alt.Axis(format='~s')),
             color=alt.Color('Source:N', 
-                           scale=alt.Scale(domain=['Cumulative Vested', 'Cumulative Emitted'],
-                                         range=['#1f77b4', '#2ca02c'])),
+                           scale=alt.Scale(domain=['Team Allocation (Vested)', 'Mining Emissions'],
+                                         range=['#1f77b4', '#2ca02c']),
+                           legend=alt.Legend(orient='bottom')),
             tooltip=['Month', 'Source', alt.Tooltip('Tokens', format='~s')]
         )
         
@@ -336,30 +398,89 @@ with tab2:
         # Layer the charts and configure
         chart = (area + rule).properties(
             title=title,
-            width=800,
+            width=400,
             height=300
         ).configure_axis(
             labelFontSize=12,
             titleFontSize=14
         ).configure_title(
             fontSize=16
+        ).configure_legend(
+            orient='bottom',
+            title=None,
+            labelFontSize=12
         ).interactive()
         
         return chart
 
-    # Create charts
+    def create_percentage_composition_chart(data, title):
+        # Calculate percentages
+        df_percent = data.copy()
+        df_percent['Team %'] = (df_percent['Cumulative Vested'] / df_percent['Circulating Supply']) * 100
+        df_percent['Mining %'] = (df_percent['Cumulative Emitted'] / df_percent['Circulating Supply']) * 100
+        
+        # Reshape data for line chart
+        df_stacked = pd.melt(
+            df_percent,
+            id_vars=['Month'],
+            value_vars=['Team %', 'Mining %'],
+            var_name='Source',
+            value_name='Percentage'
+        )
+        
+        # Map the source names to more descriptive labels
+        df_stacked['Source'] = df_stacked['Source'].map({
+            'Team %': 'Team Allocation (Vested)',
+            'Mining %': 'Mining Emissions'
+        })
+        
+        # Create the line chart
+        lines = alt.Chart(df_stacked).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Percentage:Q', title='Percentage of Circulating Supply', axis=alt.Axis(format='.1f')),
+            color=alt.Color('Source:N', 
+                           scale=alt.Scale(domain=['Team Allocation (Vested)', 'Mining Emissions'],
+                                         range=['#1f77b4', '#2ca02c']),
+                           legend=alt.Legend(orient='bottom')),
+            tooltip=['Month', 'Source', alt.Tooltip('Percentage', format='.1f')]
+        )
+        
+        # Create the vertical rule for burn start
+        rule = alt.Chart(pd.DataFrame({'x': [t_burn]})).mark_rule(
+            color='red',
+            strokeDash=[5, 5]
+        ).encode(x='x:Q')
+        
+        # Layer the charts and configure
+        chart = (lines + rule).properties(
+            title=title,
+            width=400,
+            height=300
+        ).configure_axis(
+            labelFontSize=12,
+            titleFontSize=14
+        ).configure_title(
+            fontSize=16
+        ).configure_legend(
+            orient='bottom',
+            title=None,
+            labelFontSize=12
+        ).interactive()
+        
+        return chart
+
+    # Create charts in a 3x2 grid
     col1, col2 = st.columns(2)
 
     with col1:
         st.altair_chart(create_chart(df, 'Circulating Supply', 'Circulating Supply Over Time (Net of Burns)', 'blue'), use_container_width=True)
-        st.altair_chart(create_chart(df, 'Cumulative Emissions', 'Total Tokens Ever Emitted (Gross of Burns)', 'purple'), use_container_width=True)
+        st.altair_chart(create_chart(df, 'Emissions', 'Monthly New Emissions', 'green'), use_container_width=True)
+        st.altair_chart(create_stacked_area_chart(df, 'Circulating Supply Composition Over Time (Absolute)'), use_container_width=True)
 
     with col2:
-        st.altair_chart(create_chart(df, 'Emissions', 'Monthly New Emissions', 'green'), use_container_width=True)
+        st.altair_chart(create_chart(df, 'Cumulative Emissions', 'Total Tokens Ever Emitted (Gross of Burns)', 'purple'), use_container_width=True)
         st.altair_chart(create_chart(df, 'Burn', 'Monthly Token Burns', 'orange'), use_container_width=True)
-
-    # Add supply composition chart
-    st.altair_chart(create_stacked_area_chart(df, 'Circulating Supply Composition Over Time'), use_container_width=True)
+        st.altair_chart(create_percentage_composition_chart(df, 'Circulating Supply Composition Over Time (Percentage)'), use_container_width=True)
 
     # Add net supply change chart
     st.altair_chart(create_chart(df, 'Net Supply Change', 'Monthly Net Supply Change (Emissions + Vesting - Burn)', 'red'), use_container_width=True)
