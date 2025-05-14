@@ -155,7 +155,7 @@ with tab2:
         "burn_emission_factor": 0.9,
         "burn_coefficient": 100000,
         "burn_lookback_months": 12,
-        "burn_volatility": 0.2,
+        "burn_volatility": 0.01,
         "burn_pattern": "logarithmic",
         "simulation_months": 120
     }
