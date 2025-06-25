@@ -146,7 +146,7 @@ with tab1:
         # Base fee (same across all scenarios)
         F_base = st.number_input(
             "Base Fee (F_base)", 
-            value=10.0, 
+            value=100.0, 
             step=0.1,
             help="Base fee for registrations and maintenance (same for all scenarios)",
             key="F_base"
@@ -181,9 +181,9 @@ with tab1:
         with col1:
             lambda_ent_bear = st.number_input(
                 "ENT Rate (Bear)", 
-                value=50, 
+                value=500, 
                 min_value=1, 
-                max_value=500,
+                max_value=5000,
                 help="ENT arrival rate for bearish scenario",
                 key="lambda_ent_bear"
             )
@@ -203,9 +203,9 @@ with tab1:
         with col1:
             lambda_ent_neutral = st.number_input(
                 "ENT Rate (Neutral)", 
-                value=100, 
+                value=1000, 
                 min_value=1, 
-                max_value=500,
+                max_value=5000,
                 help="ENT arrival rate for neutral scenario",
                 key="lambda_ent_neutral"
             )
@@ -225,9 +225,9 @@ with tab1:
         with col1:
             lambda_ent_bull = st.number_input(
                 "ENT Rate (Bull)", 
-                value=200, 
+                value=2000, 
                 min_value=1, 
-                max_value=500,
+                max_value=5000,
                 help="ENT arrival rate for bullish scenario",
                 key="lambda_ent_bull"
             )
@@ -617,7 +617,7 @@ with tab2:
         
         active_entities_chart = alt.Chart(active_entities_data).mark_line().encode(
             x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Count:Q', title='Count'),
+            y=alt.Y('Count:Q', title='Count', scale=alt.Scale(type='log')),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
@@ -627,7 +627,7 @@ with tab2:
                 range=[[0], [5, 5]]
             ))
         ).properties(
-            title='Active ENTs and Subnets Over Time',
+            title='Active ENTs and Subnets Over Time (Log Scale)',
             width=400,
             height=300
         ).add_params(
@@ -637,7 +637,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
@@ -651,19 +651,19 @@ with tab2:
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bearish',
-                'Type': 'ENT Registration Fees',
+                'Type': 'ENT Registration',
                 'Amount': fee_results_bear['fees_ENT_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bearish',
-                'Type': 'Subnet Registration Fees',
+                'Type': 'Subnet Registration',
                 'Amount': fee_results_bear['fees_subnet_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bearish',
-                'Type': 'Subnet Maintenance Fees',
+                'Type': 'Subnet Maintenance',
                 'Amount': fee_results_bear['fees_subnet_maint'].iloc[i]
             })
         
@@ -672,19 +672,19 @@ with tab2:
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Neutral',
-                'Type': 'ENT Registration Fees',
+                'Type': 'ENT Registration',
                 'Amount': fee_results_neutral['fees_ENT_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Neutral',
-                'Type': 'Subnet Registration Fees',
+                'Type': 'Subnet Registration',
                 'Amount': fee_results_neutral['fees_subnet_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Neutral',
-                'Type': 'Subnet Maintenance Fees',
+                'Type': 'Subnet Maintenance',
                 'Amount': fee_results_neutral['fees_subnet_maint'].iloc[i]
             })
         
@@ -693,19 +693,19 @@ with tab2:
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bullish',
-                'Type': 'ENT Registration Fees',
+                'Type': 'ENT Registration',
                 'Amount': fee_results_bull['fees_ENT_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bullish',
-                'Type': 'Subnet Registration Fees',
+                'Type': 'Subnet Registration',
                 'Amount': fee_results_bull['fees_subnet_reg'].iloc[i]
             })
             fee_categories_data.append({
                 'Epoch': epoch,
                 'Scenario': 'Bullish',
-                'Type': 'Subnet Maintenance Fees',
+                'Type': 'Subnet Maintenance',
                 'Amount': fee_results_bull['fees_subnet_maint'].iloc[i]
             })
         
@@ -719,7 +719,7 @@ with tab2:
                 range=['#d62728', '#2ca02c', '#1f77b4']
             )),
             strokeDash=alt.StrokeDash('Type:N', scale=alt.Scale(
-                domain=['ENT Registration Fees', 'Subnet Registration Fees', 'Subnet Maintenance Fees'],
+                domain=['ENT Registration', 'Subnet Registration', 'Subnet Maintenance'],
                 range=[[0], [5, 5], [10, 5]]
             ))
         ).properties(
@@ -733,7 +733,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
@@ -786,7 +786,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
@@ -839,7 +839,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
@@ -886,6 +886,9 @@ with tab2:
         
         avg_reward_data = pd.DataFrame(avg_reward_data)
         
+        # Filter to start from month 1
+        avg_reward_data = avg_reward_data[avg_reward_data['Epoch'] >= 1]
+        
         avg_reward_chart = alt.Chart(avg_reward_data).mark_line().encode(
             x=alt.X('Epoch:Q', title='Month'),
             y=alt.Y('Avg Reward per Subnet:Q', title='$BRB'),
@@ -904,7 +907,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
@@ -969,7 +972,7 @@ with tab2:
         # Add vertical line at month 48
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
-            color='red',
+            color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
