@@ -143,13 +143,32 @@ with tab1:
     with st.sidebar.expander("Fee Simulation Configuration", expanded=True):
         st.info("Configure fee simulation parameters for different market scenarios.")
         
-        # Base fee (same across all scenarios)
-        F_base = st.number_input(
-            "Base Fee (F_base)", 
-            value=100.0, 
+        # Fee configuration
+        st.subheader("Fee Configuration")
+        F_base_ent = st.number_input(
+            "ENT Registration Fee", 
+            value=10.0, 
             step=0.1,
-            help="Base fee for registrations and maintenance (same for all scenarios)",
-            key="F_base"
+            help="Base fee for ENT registration",
+            key="F_base_ent"
+        )
+        
+        F_base_subnet = st.number_input(
+            "Subnet Registration Fee", 
+            value=20.0, 
+            step=0.1,
+            help="Base fee for subnet registration",
+            key="F_base_subnet"
+        )
+        
+        subnet_maintenance_fee_pct = st.slider(
+            "Subnet Maintenance Fee (%)", 
+            value=5.0,
+            min_value=0.1,
+            max_value=20.0,
+            step=0.1,
+            help="Percentage of subnet rewards charged as maintenance fee",
+            key="subnet_maintenance_fee_pct"
         )
         
         st.subheader("Scenario Parameters")
@@ -212,8 +231,8 @@ with tab1:
         with col2:
             lambda_subnet_bear = st.number_input(
                 "Subnet Rate (Bear)", 
-                value=1.0, 
-                min_value=0.1, 
+                value=1.0/12.0, 
+                min_value=0.01, 
                 max_value=100.0,
                 help="Subnet arrival rate for bearish scenario",
                 key="lambda_subnet_bear"
@@ -234,8 +253,8 @@ with tab1:
         with col2:
             lambda_subnet_neutral = st.number_input(
                 "Subnet Rate (Neutral)", 
-                value=3.0, 
-                min_value=0.1, 
+                value=3.0/12.0, 
+                min_value=0.01, 
                 max_value=100.0,
                 help="Subnet arrival rate for neutral scenario",
                 key="lambda_subnet_neutral"
@@ -256,8 +275,8 @@ with tab1:
         with col2:
             lambda_subnet_bull = st.number_input(
                 "Subnet Rate (Bull)", 
-                value=9.0, 
-                min_value=0.1, 
+                value=9.0/12.0, 
+                min_value=0.01, 
                 max_value=100.0,
                 help="Subnet arrival rate for bullish scenario",
                 key="lambda_subnet_bull"
@@ -295,7 +314,9 @@ with tab1:
             emission_schedule = results_df['Emissions'].values
             
             # Get fee simulation parameters from sidebar
-            F_base = st.session_state.F_base
+            F_base_ent = st.session_state.F_base_ent
+            F_base_subnet = st.session_state.F_base_subnet
+            subnet_maintenance_fee_pct = st.session_state.subnet_maintenance_fee_pct / 100.0
             lambda_ent_bear = st.session_state.lambda_ent_bear
             lambda_subnet_bear = st.session_state.lambda_subnet_bear
             starting_ents = st.session_state.starting_ents
@@ -315,9 +336,12 @@ with tab1:
                 lambda_subnet=lambda_subnet_bear,
                 starting_ents=starting_ents,
                 starting_subnets=starting_subnets,
-                F_base=F_base,
+                F_base_ent=F_base_ent,
+                F_base_subnet=F_base_subnet,
+                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
                 ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime
+                subnet_lifetime=subnet_lifetime,
+                random_seed=42  # Bear scenario seed
             )
             
             fee_results_neutral = run_fee_simulation(
@@ -327,9 +351,12 @@ with tab1:
                 lambda_subnet=lambda_subnet_neutral,
                 starting_ents=starting_ents,
                 starting_subnets=starting_subnets,
-                F_base=F_base,
+                F_base_ent=F_base_ent,
+                F_base_subnet=F_base_subnet,
+                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
                 ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime
+                subnet_lifetime=subnet_lifetime,
+                random_seed=43  # Neutral scenario seed
             )
             
             fee_results_bull = run_fee_simulation(
@@ -339,9 +366,12 @@ with tab1:
                 lambda_subnet=lambda_subnet_bull,
                 starting_ents=starting_ents,
                 starting_subnets=starting_subnets,
-                F_base=F_base,
+                F_base_ent=F_base_ent,
+                F_base_subnet=F_base_subnet,
+                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
                 ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime
+                subnet_lifetime=subnet_lifetime,
+                random_seed=44  # Bull scenario seed
             )
             
             # Store fee results in session state
@@ -585,11 +615,25 @@ with tab1:
 with tab2:
     st.header("Fee Simulation")
     
+    # Add token price slider in the sidebar
+    with st.sidebar.expander("Token Price Configuration", expanded=True):
+        token_price = st.slider(
+            "BRB Token Price ($)",
+            min_value=0.01,
+            max_value=10.0,
+            value=1.0,
+            step=0.01,
+            help="Set the BRB token price in USD"
+        )
+    
     # Check if we have fee simulation results
     if 'fee_results_bear' not in st.session_state:
         st.info("Please run the simulation in the 'Emissions Schedule' tab to generate fee analysis plots.")
     else:
         st.info("Fee simulation based on the emissions schedule from the first tab.")
+        
+        # Store token price in session state for dynamic updates
+        st.session_state.token_price = token_price
         
         # Display fee simulation results
         fee_results_bear = st.session_state.fee_results_bear
@@ -646,33 +690,57 @@ with tab2:
         
         active_entities_data = pd.DataFrame(active_entities_data)
         
-        active_entities_chart = alt.Chart(active_entities_data).mark_line().encode(
+        # Split data into ENTs and Subnets
+        active_ents_data = active_entities_data[active_entities_data['Type'] == 'Active ENTs']
+        active_subnets_data = active_entities_data[active_entities_data['Type'] == 'Active Subnets']
+        
+        # Create chart for Active ENTs
+        active_ents_chart = alt.Chart(active_ents_data).mark_line().encode(
             x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Count:Q', title='Count', scale=alt.Scale(type='log')),
+            y=alt.Y('Count:Q', title='Count'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
-            )),
-            strokeDash=alt.StrokeDash('Type:N', scale=alt.Scale(
-                domain=['Active ENTs', 'Active Subnets'],
-                range=[[0], [5, 5]]
             ))
         ).properties(
-            title='Active ENTs and Subnets Over Time (Log Scale)',
+            title='Active ENTs Over Time',
             width=450,
             height=300
         ).add_params(
             alt.selection_interval(bind='scales')
         )
         
-        # Add vertical line at month 48
+        # Create chart for Active Subnets
+        active_subnets_chart = alt.Chart(active_subnets_data).mark_line().encode(
+            x=alt.X('Epoch:Q', title='Month'),
+            y=alt.Y('Count:Q', title='Count'),
+            color=alt.Color('Scenario:N', scale=alt.Scale(
+                domain=['Bearish', 'Neutral', 'Bullish'],
+                range=['#d62728', '#2ca02c', '#1f77b4']
+            ))
+        ).properties(
+            title='Active Subnets Over Time',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at month 48 for both charts
         vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
             strokeDash=[5, 5],
             color='gray',
             strokeWidth=2
         ).encode(x='x:Q')
 
-        active_entities_chart = alt.layer(active_entities_chart, vertical_line).configure_view(
+        active_ents_chart = alt.layer(active_ents_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        active_subnets_chart = alt.layer(active_subnets_chart, vertical_line).configure_view(
             strokeWidth=0
         ).configure_axisLeft(
             labelPadding=10,
@@ -1043,22 +1111,25 @@ with tab2:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.altair_chart(active_entities_chart, use_container_width=True)
+            st.altair_chart(active_ents_chart, use_container_width=True)
         
         with col2:
-            st.altair_chart(fee_categories_chart, use_container_width=True)
+            st.altair_chart(active_subnets_chart, use_container_width=True)
         
         col3, col4 = st.columns(2)
         
         with col3:
-            st.altair_chart(cumulative_fees_chart, use_container_width=True)
+            st.altair_chart(fee_categories_chart, use_container_width=True)
         
         with col4:
-            st.altair_chart(total_fees_chart, use_container_width=True)
+            st.altair_chart(cumulative_fees_chart, use_container_width=True)
         
         col5, col6 = st.columns(2)
         
         with col5:
+            st.altair_chart(total_fees_chart, use_container_width=True)
+        
+        with col6:
             st.altair_chart(fees_fraction_chart, use_container_width=True)
         
         with col6:
@@ -1117,7 +1188,7 @@ with tab2:
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bull):.1f} BRB")
         
         # Add yearly breakdown of average BRB per subnet
-        st.subheader("Average BRB per Subnet by Year")
+        st.subheader("Average Earnings per Subnet by Year")
         
         def calculate_yearly_avg_reward(fee_results, emission_schedule):
             """Calculate average BRB per subnet for each year"""
@@ -1147,20 +1218,43 @@ with tab2:
         neutral_yearly = calculate_yearly_avg_reward(fee_results_neutral, emission_schedule)
         bull_yearly = calculate_yearly_avg_reward(fee_results_bull, emission_schedule)
         
-        # Display yearly breakdown in columns
+        # Display yearly breakdown in columns with both BRB and USD values
         col1, col2, col3 = st.columns(3)
         
+        def display_earnings_metrics(yearly_data, token_price):
+            """Display earnings metrics in both BRB and USD with improved formatting"""
+            st.markdown("##### Annual Earnings per Subnet")
+            
+            # Create two columns for the headers
+            brb_col, usd_col = st.columns(2)
+            with brb_col:
+                st.markdown("**BRB**")
+            with usd_col:
+                st.markdown("**USD**")
+            
+            # Display each year's data
+            for year, avg_reward in yearly_data.items():
+                usd_value = avg_reward * token_price
+                
+                # Create columns for this year's values
+                year_brb_col, year_usd_col = st.columns(2)
+                
+                with year_brb_col:
+                    st.markdown(f"**{year}:** {avg_reward:,.0f}")
+                with year_usd_col:
+                    st.markdown(f"${usd_value:,.2f}")
+        
         with col1:
-            st.write("**Bearish Scenario**")
-            for year, avg_reward in bear_yearly.items():
-                st.metric(year, f"{avg_reward:.1f} BRB")
+            st.markdown("### Bearish Scenario")
+            st.markdown("---")
+            display_earnings_metrics(bear_yearly, token_price)
         
         with col2:
-            st.write("**Neutral Scenario**")
-            for year, avg_reward in neutral_yearly.items():
-                st.metric(year, f"{avg_reward:.1f} BRB")
+            st.markdown("### Neutral Scenario")
+            st.markdown("---")
+            display_earnings_metrics(neutral_yearly, token_price)
         
         with col3:
-            st.write("**Bullish Scenario**")
-            for year, avg_reward in bull_yearly.items():
-                st.metric(year, f"{avg_reward:.1f} BRB") 
+            st.markdown("### Bullish Scenario")
+            st.markdown("---")
+            display_earnings_metrics(bull_yearly, token_price) 

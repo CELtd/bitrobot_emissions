@@ -11,16 +11,22 @@ def run_fee_simulation(
     ent_lifetime=12,
     subnet_lifetime=24,
     lookback_window=12,
-    F_base=10.0,
+    F_base_ent=10.0,  # Static fee for ENT registration
+    F_base_subnet=20.0,  # Static fee for subnet registration
+    subnet_maintenance_fee_pct=0.05,  # Percentage of rewards charged as maintenance fee
     alpha=0.5,
     eta=0.5,
     gamma=1.0,
     delta=1.0,
-    kappa=0.05
+    kappa=0.05,
+    random_seed=42  # Added random seed parameter with default value
 ):
+    # Set random seed for reproducibility
+    np.random.seed(random_seed)
+
     # Default emission schedule if not provided
     if emission_schedule is None:
-        emission_schedule = np.full(epochs, 1000.0)
+        return ValueError("Emission schedule is required")
 
     # Initialize registries with starting numbers
     # For starting entities, we assume they were registered at time -1 (just before simulation starts)
@@ -51,25 +57,24 @@ def run_fee_simulation(
         new_subnets = np.random.poisson(lambda_subnet)
         ent_registry += [t] * new_ents
         subnet_registry += [t] * new_subnets
+        
+        # Ensure there's always at least one subnet
+        if len(subnet_registry) == 0:
+            subnet_registry.append(t)  # Add a new subnet at current time if none exist
 
         # Compute rolling average reward
         R_avg = compute_R_avg(t)
 
-        # Fees for new ENTs
-        # fee_ent = sum(max(F_base, min(alpha * R_avg, eta * 1.0)) for _ in range(new_ents))
-        fee_ent = sum(F_base for _ in range(new_ents))
-        # Fees for new subnets
-        # fee_subnet_reg = sum(max(F_base, min(alpha * R_avg, eta * 1.0)) for _ in range(new_subnets))
-        fee_subnet_reg = sum(F_base for _ in range(new_subnets))
+        # Fees for new ENTs - using static ENT fee
+        fee_ent = sum(F_base_ent for _ in range(new_ents))
+        
+        # Fees for new subnets - using static subnet fee
+        fee_subnet_reg = sum(F_base_subnet for _ in range(new_subnets))
 
-        # Maintenance fees for subnets
-        R_e = emission_schedule[t] / max(len(subnet_registry), 1)
-        # fee_subnet_maint = sum(
-        #     max(F_base, alpha * gamma * R_e + (1 - alpha) * delta * 1.0)
-        #     for _ in subnet_registry
-        # )
+        # Maintenance fees for subnets - using percentage of rewards
+        R_e = emission_schedule[t] / max(len(subnet_registry), 1)  # Rewards per subnet
         fee_subnet_maint = sum(
-            F_base
+            R_e * subnet_maintenance_fee_pct  # Charge percentage of rewards as maintenance fee
             for _ in subnet_registry
         )
 
