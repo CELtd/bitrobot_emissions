@@ -6,9 +6,9 @@ class BitRobotEmissionsModel:
                  initial_supply=0,
                  team_allocation=260_000_000,  # Split from 520M to 260M
                  investor_allocation=260_000_000,  # New parameter
-                 dao_allocation=480_000_000,
-                 dao_initial_liquidity=50_000_000,
-                 dao_target_48m=200_000_000,
+                 foundation_allocation=480_000_000,
+                 foundation_initial_liquidity=50_000_000,
+                 foundation_target_48m=200_000_000,
                  fixed_emissions_target=200_000_000,
                  team_cliff_months=12,
                  team_vesting_months=24,
@@ -49,9 +49,9 @@ class BitRobotEmissionsModel:
         self.initial_supply = initial_supply
         self.team_allocation = team_allocation
         self.investor_allocation = investor_allocation
-        self.dao_allocation = dao_allocation
-        self.dao_initial_liquidity = dao_initial_liquidity
-        self.dao_target_48m = dao_target_48m
+        self.dao_allocation = foundation_allocation
+        self.dao_initial_liquidity = foundation_initial_liquidity
+        self.dao_target_48m = foundation_target_48m
         self.fixed_emissions_target = fixed_emissions_target
         self.team_cliff_months = team_cliff_months
         self.team_vesting_months = team_vesting_months

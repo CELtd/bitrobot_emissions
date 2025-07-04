@@ -48,27 +48,27 @@ with tab1:
             ) * 1_000_000
             
             dao_allocation = st.number_input(
-                "DAO Allocation (M)", 
+                "Foundation Allocation (M)", 
                 value=480, 
                 min_value=0, 
                 max_value=1000,
-                help="Tokens allocated to DAO in millions"
+                help="Tokens allocated to Foundation in millions"
             ) * 1_000_000
             
             dao_initial_liquidity = st.number_input(
-                "DAO Initial Liquidity (M)", 
+                "Foundation Initial Liquidity (M)", 
                 value=50, 
                 min_value=0, 
                 max_value=100,
-                help="Initial DAO liquidity release in millions"
+                help="Initial Foundation liquidity release in millions"
             ) * 1_000_000
             
             dao_target_48m = st.number_input(
-                "DAO Target 48M (M)", 
+                "Foundation Target 48M (M)", 
                 value=480, 
                 min_value=0, 
                 max_value=500,
-                help="Target DAO tokens released by month 48 in millions"
+                help="Target Foundation tokens released by month 48 in millions"
             ) * 1_000_000
         
         with col2:
@@ -87,7 +87,7 @@ with tab1:
             )
             
             dao_vesting_months = st.number_input(
-                "DAO Vesting (months)", 
+                "Foundation Vesting (months)", 
                 value=48, 
                 min_value=1, 
                 max_value=120
@@ -289,9 +289,9 @@ with tab1:
             model = BitRobotEmissionsModel(
                 team_allocation=team_allocation,
                 investor_allocation=investor_allocation,
-                dao_allocation=dao_allocation,
-                dao_initial_liquidity=dao_initial_liquidity,
-                dao_target_48m=dao_target_48m,
+                foundation_allocation=dao_allocation,
+                foundation_initial_liquidity=dao_initial_liquidity,
+                foundation_target_48m=dao_target_48m,
                 fixed_emissions_target=fixed_emissions_target,
                 team_cliff_months=team_cliff_months,
                 team_vesting_months=team_vesting_months,
@@ -386,12 +386,12 @@ with tab1:
         results_df = st.session_state.results_df
         
         # Calculate components for the breakdown plot
-        dao_community_portion = 20.0 / 48.0
-        community_portion = results_df['DAO Vested'] * dao_community_portion + results_df['Emissions'].cumsum()
+        foundation_community_portion = 20.0 / 48.0
+        community_portion = results_df['DAO Vested'] * foundation_community_portion + results_df['Emissions'].cumsum()
         team_portion = results_df['Team Vested']
         investor_portion = results_df['Investor Vested']
-        dao_team_portion = results_df['DAO Vested'] * (1 - dao_community_portion)
-        sum_val = community_portion + team_portion + dao_team_portion + investor_portion
+        foundation_team_portion = results_df['DAO Vested'] * (1 - foundation_community_portion)
+        sum_val = community_portion + team_portion + foundation_team_portion + investor_portion
         
         # Create data for breakdown plot - properly structured
         breakdown_data = []
@@ -414,7 +414,7 @@ with tab1:
             breakdown_data.append({
                 'Month': month,
                 'Component': 'Foundation',
-                'Percentage': (dao_team_portion.iloc[i] / sum_val.iloc[i]) * 100
+                'Percentage': (foundation_team_portion.iloc[i] / sum_val.iloc[i]) * 100
             })
         breakdown_data = pd.DataFrame(breakdown_data)
         
@@ -486,7 +486,7 @@ with tab1:
         for i, month in enumerate(results_df['Month']):
             cumulative_data.append({
                 'Month': month,
-                'Component': 'DAO',
+                'Component': 'Foundation',
                 'Amount': results_df['DAO Vested'].iloc[i] / 1e9
             })
             cumulative_data.append({
@@ -515,7 +515,7 @@ with tab1:
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Amount:Q', title='BRB (Billions)'),
             color=alt.Color('Component:N', scale=alt.Scale(
-                domain=['DAO', 'Team', 'Emissions', 'Burn', 'Circulating Supply'],
+                domain=['Foundation', 'Team', 'Emissions', 'Burn', 'Circulating Supply'],
                 range=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
             ))
         ).properties(
@@ -534,16 +534,16 @@ with tab1:
         month_data = results_df[results_df['Month'] == target_month].iloc[0]
         
         # Calculate the cumulative supply for each component
-        dao_community_portion = 20.0 / 48.0
-        community_supply = month_data['DAO Vested'] * dao_community_portion + results_df['Emissions'].cumsum()[target_month]
+        foundation_community_portion = 20.0 / 48.0
+        community_supply = month_data['DAO Vested'] * foundation_community_portion + results_df['Emissions'].cumsum()[target_month]
         team_supply = month_data['Team Vested']
         investor_supply = month_data['Investor Vested']
-        dao_team_supply = month_data['DAO Vested'] * (1 - dao_community_portion)
+        foundation_team_supply = month_data['DAO Vested'] * (1 - foundation_community_portion)
         
         # Create data for pie chart
         pie_data = pd.DataFrame({
             'Component': ['Community', 'Team', 'Investors', 'Foundation'],
-            'Supply': [community_supply, team_supply, investor_supply, dao_team_supply]
+            'Supply': [community_supply, team_supply, investor_supply, foundation_team_supply]
         })
         
         # Calculate percentages for labels
