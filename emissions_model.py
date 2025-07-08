@@ -4,15 +4,14 @@ import pandas as pd
 class BitRobotEmissionsModel:
     def __init__(self,
                  initial_supply=0,
-                 team_allocation=260_000_000,  # Split from 520M to 260M
-                 investor_allocation=260_000_000,  # New parameter
-                 foundation_allocation=480_000_000,
+                 team_allocation=269_000_000,  
+                 investor_allocation=351_000_000, 
+                 foundation_allocation=307_000_000,
                  foundation_initial_liquidity=50_000_000,
-                 foundation_target_48m=200_000_000,
-                 fixed_emissions_target=200_000_000,
+                 foundation_target_48m=307_000_000,
                  team_cliff_months=12,
                  team_vesting_months=24,
-                 dao_vesting_months=48,
+                 foundation_vesting_months=48,
                  t_burn=48,
                  burn_emission_factor=0.9,
                  burn_coefficient=1000000,
@@ -29,7 +28,7 @@ class BitRobotEmissionsModel:
         - investor_allocation: Tokens allocated to investors (default: 260M)
         - dao_allocation: Tokens allocated to DAO (default: 480M)
         - dao_initial_liquidity: Initial DAO liquidity release (default: 50M)
-        - dao_target_48m: Target DAO tokens released by month 48 (default: 200M)
+        - dao_target_48m: Target DAO tokens released by month 48 (default: 476M)
         - team_cliff_months: Number of months for team cliff (default: 12)
         - team_vesting_months: Number of months for team vesting after cliff (default: 24)
         - dao_vesting_months: Number of months for DAO vesting (default: 48)
@@ -49,13 +48,12 @@ class BitRobotEmissionsModel:
         self.initial_supply = initial_supply
         self.team_allocation = team_allocation
         self.investor_allocation = investor_allocation
-        self.dao_allocation = foundation_allocation
-        self.dao_initial_liquidity = foundation_initial_liquidity
-        self.dao_target_48m = foundation_target_48m
-        self.fixed_emissions_target = fixed_emissions_target
+        self.foundation_allocation = foundation_allocation
+        self.foundation_initial_liquidity = foundation_initial_liquidity
+        self.foundation_target_48m = foundation_target_48m
         self.team_cliff_months = team_cliff_months
         self.team_vesting_months = team_vesting_months
-        self.dao_vesting_months = dao_vesting_months
+        self.foundation_vesting_months = foundation_vesting_months
         self.t_burn = t_burn
         self.burn_emission_factor = burn_emission_factor
         self.burn_coefficient = burn_coefficient
@@ -75,13 +73,15 @@ class BitRobotEmissionsModel:
         self.investor_vesting = np.zeros(simulation_months + 1)
         self.investor_vested = np.zeros(simulation_months + 1)
         
-        # DAO vesting arrays
-        self.dao_vesting = np.zeros(simulation_months + 1)
-        self.dao_vested = np.zeros(simulation_months + 1)
+        # Foundation vesting arrays
+        self.foundation_vesting = np.zeros(simulation_months + 1)
+        self.foundation_vested = np.zeros(simulation_months + 1)
         
         # Emissions arrays
         self.emissions = np.zeros(simulation_months + 1)
         self.burn = np.zeros(simulation_months + 1)
+        self.cumulative_emissions = np.zeros(simulation_months + 1)
+        self.cumulative_fixed_emissions = np.zeros(simulation_months + 1)
         
         # Supply tracking arrays
         self.circulating_supply = np.zeros(simulation_months + 1)
@@ -90,7 +90,7 @@ class BitRobotEmissionsModel:
         # Component tracking arrays
         self.team_contribution = np.zeros(simulation_months + 1)
         self.investor_contribution = np.zeros(simulation_months + 1)
-        self.dao_contribution = np.zeros(simulation_months + 1)
+        self.foundation_contribution = np.zeros(simulation_months + 1)
         self.emissions_contribution = np.zeros(simulation_months + 1)
         
         # Define fixed emissions schedule
@@ -99,9 +99,30 @@ class BitRobotEmissionsModel:
         
     def _set_default_fixed_emissions(self):
         """Set the default fixed emissions schedule for the first 48 months."""
-        # Linear emissions over 48 months to reach 200M
-        monthly_emission = self.fixed_emissions_target / self.t_burn
-        self.fixed_emissions[1:self.t_burn + 1] = monthly_emission
+        # Yearly emissions schedule:
+        # Year 1: 100M tokens (months 1-12)
+        # Year 2: 80M tokens (months 13-24)
+        # Year 3: 50M tokens (months 25-36)
+        # Year 4: 20M tokens (months 37-48)
+        
+        # also, lets hard code teh community round of 23M to 
+        # match the entire emissions budget.  we spread this over the 48 months.
+
+        # Year 1: 100M over 12 months
+        monthly_emission_y1 = (100_000_000 + 10_000_000) / 12
+        self.fixed_emissions[1:13] = monthly_emission_y1
+        
+        # Year 2: 80M over 12 months
+        monthly_emission_y2 = (80_000_000 + 5_000_000) / 12
+        self.fixed_emissions[13:25] = monthly_emission_y2
+        
+        # Year 3: 50M over 12 months
+        monthly_emission_y3 = (50_000_000 + 5_000_000) / 12
+        self.fixed_emissions[25:37] = monthly_emission_y3
+        
+        # Year 4: 20M over 12 months
+        monthly_emission_y4 = (20_000_000 + 3_000_000) / 12
+        self.fixed_emissions[37:49] = monthly_emission_y4
         
     def _calculate_base_burn(self, t):
         """Calculate the base burn value for a given month based on the selected pattern."""
@@ -131,17 +152,17 @@ class BitRobotEmissionsModel:
         end_month = start_month + self.team_vesting_months
         self.investor_vesting[start_month:end_month] = monthly_vesting
         
-    def calculate_dao_vesting(self):
+    def calculate_foundation_vesting(self):
         """Calculate the monthly DAO vesting schedule."""
         # Initial liquidity release
-        self.dao_vesting[0] = self.dao_initial_liquidity
+        self.foundation_vesting[0] = self.foundation_initial_liquidity
         
         # Calculate remaining tokens to vest by month 48
-        remaining_to_48m = self.dao_target_48m - self.dao_initial_liquidity
+        remaining_to_48m = self.foundation_target_48m - self.foundation_initial_liquidity
         
         # Linear vesting of remaining tokens over 48 months
-        monthly_vesting = remaining_to_48m / self.dao_vesting_months
-        self.dao_vesting[1:self.dao_vesting_months + 1] = monthly_vesting
+        monthly_vesting = remaining_to_48m / self.foundation_vesting_months
+        self.foundation_vesting[1:self.foundation_vesting_months + 1] = monthly_vesting
         
     def calculate_burn(self):
         """Calculate the monthly burn based on the selected pattern with random variation."""
@@ -157,7 +178,7 @@ class BitRobotEmissionsModel:
         # Calculate vesting schedules
         self.calculate_team_vesting()
         self.calculate_investor_vesting()
-        self.calculate_dao_vesting()
+        self.calculate_foundation_vesting()
         
         # Calculate burn
         self.calculate_burn()
@@ -165,12 +186,12 @@ class BitRobotEmissionsModel:
         # Initialize tracking arrays
         self.team_vested[0] = self.team_vesting[0]
         self.investor_vested[0] = self.investor_vesting[0]
-        self.dao_vested[0] = self.dao_vesting[0]
-        self.circulating_supply[0] = self.team_vesting[0] + self.investor_vesting[0] + self.dao_vesting[0]
+        self.foundation_vested[0] = self.foundation_vesting[0]
+        self.circulating_supply[0] = self.team_vesting[0] + self.investor_vesting[0] + self.foundation_vesting[0]
         self.total_supply[0] = self.initial_supply
         self.team_contribution[0] = self.team_vesting[0]
         self.investor_contribution[0] = self.investor_vesting[0]
-        self.dao_contribution[0] = self.dao_vesting[0]
+        self.foundation_contribution[0] = self.foundation_vesting[0]
         self.emissions_contribution[0] = 0
         
         # Simulate each month
@@ -178,7 +199,7 @@ class BitRobotEmissionsModel:
             # Update vesting amounts
             self.team_vested[t] = self.team_vested[t-1] + self.team_vesting[t]
             self.investor_vested[t] = self.investor_vested[t-1] + self.investor_vesting[t]
-            self.dao_vested[t] = self.dao_vested[t-1] + self.dao_vesting[t]
+            self.foundation_vested[t] = self.foundation_vested[t-1] + self.foundation_vesting[t]
             
             # Calculate emissions
             if t < self.t_burn:
@@ -190,6 +211,12 @@ class BitRobotEmissionsModel:
                 else:
                     self.emissions[t] = self.fixed_emissions[t]
             
+            # Update cumulative emissions
+            self.cumulative_emissions[t] = self.cumulative_emissions[t-1] + self.emissions[t]
+            
+            # Update cumulative fixed emissions (community allocation)
+            self.cumulative_fixed_emissions[t] = self.cumulative_fixed_emissions[t-1] + self.fixed_emissions[t]
+            
             # Update total supply (initial supply + cumulative emissions)
             self.total_supply[t] = self.initial_supply + np.sum(self.emissions[:t+1])
             
@@ -197,15 +224,15 @@ class BitRobotEmissionsModel:
             self.circulating_supply[t] = (
                 self.team_vested[t] + 
                 self.investor_vested[t] + 
-                self.dao_vested[t] + 
-                np.sum(self.emissions[:t+1]) - 
+                self.foundation_vested[t] + 
+                self.cumulative_emissions[t] - 
                 np.sum(self.burn[:t+1])
             )
             
             self.team_contribution[t] = self.team_vested[t]
             self.investor_contribution[t] = self.investor_vested[t]
-            self.dao_contribution[t] = self.dao_vested[t]
-            self.emissions_contribution[t] = np.sum(self.emissions[:t+1]) - np.sum(self.burn[:t+1])
+            self.foundation_contribution[t] = self.foundation_vested[t]
+            self.emissions_contribution[t] = self.cumulative_emissions[t] - np.sum(self.burn[:t+1])
             
     def get_results_dataframe(self):
         """Return the simulation results as a pandas DataFrame."""
@@ -215,15 +242,17 @@ class BitRobotEmissionsModel:
             'Team Vested': self.team_vested,
             'Investor Vesting': self.investor_vesting,
             'Investor Vested': self.investor_vested,
-            'DAO Vesting': self.dao_vesting,
-            'DAO Vested': self.dao_vested,
+            'Foundation Vesting': self.foundation_vesting,
+            'Foundation Vested': self.foundation_vested,
             'Emissions': self.emissions,
             'Burn': self.burn,
+            'Cumulative Emissions': self.cumulative_emissions,
+            'Cumulative Fixed Emissions': self.cumulative_fixed_emissions,
             'Circulating Supply': self.circulating_supply,
             'Total Supply': self.total_supply,
             'Team Contribution': self.team_contribution,
             'Investor Contribution': self.investor_contribution,
-            'DAO Contribution': self.dao_contribution,
+            'Foundation Contribution': self.foundation_contribution,
             'Emissions Contribution': self.emissions_contribution
         })
         return df

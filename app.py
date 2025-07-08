@@ -33,7 +33,7 @@ with tab1:
         with col1:
             team_allocation = st.number_input(
                 "Team Allocation (M)", 
-                value=260, 
+                value=269, 
                 min_value=0, 
                 max_value=1000,
                 help="Tokens allocated to team in millions"
@@ -41,34 +41,26 @@ with tab1:
             
             investor_allocation = st.number_input(
                 "Investor Allocation (M)", 
-                value=260, 
+                value=351, 
                 min_value=0, 
                 max_value=1000,
                 help="Tokens allocated to investors in millions"
             ) * 1_000_000
             
-            dao_allocation = st.number_input(
-                "Foundation Allocation (M)", 
-                value=480, 
+            foundation_allocation = st.number_input(
+                "Foundation & Ecosystem Growth (M)", 
+                value=307, 
                 min_value=0, 
                 max_value=1000,
                 help="Tokens allocated to Foundation in millions"
             ) * 1_000_000
             
-            dao_initial_liquidity = st.number_input(
+            foundation_initial_liquidity = st.number_input(
                 "Foundation Initial Liquidity (M)", 
                 value=50, 
                 min_value=0, 
                 max_value=100,
                 help="Initial Foundation liquidity release in millions"
-            ) * 1_000_000
-            
-            dao_target_48m = st.number_input(
-                "Foundation Target 48M (M)", 
-                value=480, 
-                min_value=0, 
-                max_value=500,
-                help="Target Foundation tokens released by month 48 in millions"
             ) * 1_000_000
         
         with col2:
@@ -86,20 +78,12 @@ with tab1:
                 max_value=120
             )
             
-            dao_vesting_months = st.number_input(
+            foundation_vesting_months = st.number_input(
                 "Foundation Vesting (months)", 
                 value=48, 
                 min_value=1, 
                 max_value=120
             )
-            
-            fixed_emissions_target = st.number_input(
-                "Fixed Emissions Target (M)", 
-                value=272.3209, 
-                min_value=0.0, 
-                max_value=1000.0,
-                help="Total fixed emissions target in millions"
-            ) * 1_000_000
             
             t_burn = st.number_input(
                 "Burn Start Month", 
@@ -289,13 +273,12 @@ with tab1:
             model = BitRobotEmissionsModel(
                 team_allocation=team_allocation,
                 investor_allocation=investor_allocation,
-                foundation_allocation=dao_allocation,
-                foundation_initial_liquidity=dao_initial_liquidity,
-                foundation_target_48m=dao_target_48m,
-                fixed_emissions_target=fixed_emissions_target,
+                foundation_allocation=foundation_allocation,
+                foundation_initial_liquidity=foundation_initial_liquidity,
+                foundation_target_48m=foundation_allocation,
                 team_cliff_months=team_cliff_months,
                 team_vesting_months=team_vesting_months,
-                dao_vesting_months=dao_vesting_months,
+                foundation_vesting_months=foundation_vesting_months,
                 t_burn=t_burn,
                 burn_emission_factor=burn_emission_factor,
                 burn_coefficient=burn_coefficient,
@@ -386,12 +369,11 @@ with tab1:
         results_df = st.session_state.results_df
         
         # Calculate components for the breakdown plot
-        foundation_community_portion = 20.0 / 48.0
-        community_portion = results_df['DAO Vested'] * foundation_community_portion + results_df['Emissions'].cumsum()
+        community_portion = results_df['Cumulative Emissions']
         team_portion = results_df['Team Vested']
         investor_portion = results_df['Investor Vested']
-        foundation_team_portion = results_df['DAO Vested'] * (1 - foundation_community_portion)
-        sum_val = community_portion + team_portion + foundation_team_portion + investor_portion
+        foundation_portion = results_df['Foundation Vested']
+        sum_val = community_portion + team_portion + foundation_portion + investor_portion
         
         # Create data for breakdown plot - properly structured
         breakdown_data = []
@@ -413,8 +395,8 @@ with tab1:
             })
             breakdown_data.append({
                 'Month': month,
-                'Component': 'Foundation',
-                'Percentage': (foundation_team_portion.iloc[i] / sum_val.iloc[i]) * 100
+                'Component': 'Foundation & Ecosystem Growth',
+                'Percentage': (foundation_portion.iloc[i] / sum_val.iloc[i]) * 100
             })
         breakdown_data = pd.DataFrame(breakdown_data)
         
@@ -423,7 +405,7 @@ with tab1:
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Percentage:Q', title='Percentage (%)'),
             color=alt.Color('Component:N', scale=alt.Scale(
-                domain=['Community', 'Team', 'Investors', 'Foundation'],
+                domain=['Community', 'Team', 'Investors', 'Foundation & Ecosystem Growth'],
                 range=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
             )),
             strokeDash=alt.condition(
@@ -487,7 +469,7 @@ with tab1:
             cumulative_data.append({
                 'Month': month,
                 'Component': 'Foundation',
-                'Amount': results_df['DAO Vested'].iloc[i] / 1e9
+                'Amount': results_df['Foundation Vested'].iloc[i] / 1e9
             })
             cumulative_data.append({
                 'Month': month,
@@ -515,7 +497,7 @@ with tab1:
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Amount:Q', title='BRB (Billions)'),
             color=alt.Color('Component:N', scale=alt.Scale(
-                domain=['Foundation', 'Team', 'Emissions', 'Burn', 'Circulating Supply'],
+                domain=['Foundation & Ecosystem Growth', 'Team', 'Emissions', 'Burn', 'Circulating Supply'],
                 range=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
             ))
         ).properties(
@@ -533,16 +515,17 @@ with tab1:
         target_month = 48
         month_data = results_df[results_df['Month'] == target_month].iloc[0]
         
+        print(month_data)
         # Calculate the cumulative supply for each component
-        foundation_community_portion = 20.0 / 48.0
-        community_supply = month_data['DAO Vested'] * foundation_community_portion + results_df['Emissions'].cumsum()[target_month]
+        # For community, we use the cumulative fixed emissions (community allocation)
+        community_supply = month_data['Cumulative Fixed Emissions']
         team_supply = month_data['Team Vested']
         investor_supply = month_data['Investor Vested']
-        foundation_team_supply = month_data['DAO Vested'] * (1 - foundation_community_portion)
+        foundation_team_supply = month_data['Foundation Vested']
         
         # Create data for pie chart
         pie_data = pd.DataFrame({
-            'Component': ['Community', 'Team', 'Investors', 'Foundation'],
+            'Component': ['Community', 'Team', 'Investors', 'Foundation & Ecosystem Growth'],
             'Supply': [community_supply, team_supply, investor_supply, foundation_team_supply]
         })
         
@@ -554,7 +537,7 @@ with tab1:
         pie_chart = alt.Chart(pie_data).mark_arc().encode(
             theta=alt.Theta('Supply:Q', type='quantitative'),
             color=alt.Color('Component:N', scale=alt.Scale(
-                domain=['Community', 'Team', 'Investors', 'Foundation'],
+                domain=['Community', 'Team', 'Investors', 'Foundation & Ecosystem Growth'],
                 range=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
             ), legend=alt.Legend(title='Token Allocation')),
             tooltip=['Component', alt.Tooltip('Supply:Q', format='.0f'), alt.Tooltip('Percentage:Q', format='.1f')]
