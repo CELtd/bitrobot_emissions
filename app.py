@@ -568,28 +568,67 @@ with tab1:
         st.subheader("Summary Statistics")
         col1, col2, col3, col4 = st.columns(4)
         
+        # Get month 48 data
+        month_48_data = results_df[results_df['Month'] == 48].iloc[0]
+        
+        # Calculate total allocated supply (team + investor + foundation + community emissions)
+        total_allocated = (team_allocation + investor_allocation + foundation_allocation + 
+                          month_48_data['Cumulative Fixed Emissions'])
+        
         with col1:
             st.metric(
-                "Total Supply at Month 48",
-                f"{results_df[results_df['Month'] == 48]['Total Supply'].iloc[0] / 1e9:.2f}B BRB"
+                "Total Allocated Supply at Month 48",
+                f"{total_allocated / 1e9:.2f}B BRB"
             )
         
         with col2:
             st.metric(
                 "Circulating Supply at Month 48",
-                f"{results_df[results_df['Month'] == 48]['Circulating Supply'].iloc[0] / 1e9:.2f}B BRB"
+                f"{month_48_data['Circulating Supply'] / 1e9:.2f}B BRB"
             )
         
         with col3:
             st.metric(
                 "Total Emissions by Month 48",
-                f"{results_df[results_df['Month'] == 48]['Emissions'].cumsum().iloc[-1] / 1e6:.1f}M BRB"
+                f"{month_48_data['Cumulative Emissions'] / 1e6:.1f}M BRB"
             )
         
         with col4:
             st.metric(
                 "Total Burn by Month 48",
-                f"{results_df[results_df['Month'] == 48]['Burn'].cumsum().iloc[-1] / 1e6:.1f}M BRB"
+                f"{results_df['Burn'].cumsum().iloc[48] / 1e6:.1f}M BRB"
+            )
+        
+        # Add allocation breakdown
+        st.subheader("Allocation Breakdown at Month 48")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Team Allocation",
+                f"{team_allocation / 1e6:.0f}M BRB",
+                f"{(team_allocation / total_allocated * 100):.1f}%"
+            )
+        
+        with col2:
+            st.metric(
+                "Investor Allocation", 
+                f"{investor_allocation / 1e6:.0f}M BRB",
+                f"{(investor_allocation / total_allocated * 100):.1f}%"
+            )
+        
+        with col3:
+            st.metric(
+                "Foundation Allocation",
+                f"{foundation_allocation / 1e6:.0f}M BRB", 
+                f"{(foundation_allocation / total_allocated * 100):.1f}%"
+            )
+        
+        with col4:
+            st.metric(
+                "Community Emissions",
+                f"{month_48_data['Cumulative Fixed Emissions'] / 1e6:.0f}M BRB",
+                f"{(month_48_data['Cumulative Fixed Emissions'] / total_allocated * 100):.1f}%"
             )
     
     else:
@@ -1170,43 +1209,64 @@ with tab2:
                 avg_reward_bull.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bull):.1f} BRB")
         
-        # Add yearly breakdown of average BRB per subnet
-        st.subheader("Average Earnings per Subnet by Year")
+        # Add yearly breakdown of earnings per subnet
+        st.subheader("Earnings per Subnet by Year")
         
-        def calculate_yearly_avg_reward(fee_results, emission_schedule):
-            """Calculate average BRB per subnet for each year"""
-            yearly_avg = {}
+        def calculate_yearly_earnings(fee_results, emission_schedule):
+            """Calculate both average monthly and total annual BRB per subnet for each year"""
+            yearly_metrics = {}
             
             for year in range(1, 5):  # Years 1-4
                 start_month = (year - 1) * 12 + 1
                 end_month = year * 12
                 
+                # For average monthly calculation (current approach)
                 year_rewards = []
+                # For total annual calculation (new approach)
+                total_yearly_rewards = 0
+                subnet_counts = []
+                
                 for i, epoch in enumerate(fee_results['epoch']):
                     if start_month <= epoch <= end_month:
                         active_subnets = fee_results['active_subnets'].iloc[i]
                         monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+                        
+                        # Average monthly calculation
                         avg_reward = monthly_emission / max(active_subnets, 1)
                         year_rewards.append(avg_reward)
+                        
+                        # Total annual calculation
+                        total_yearly_rewards += monthly_emission
+                        subnet_counts.append(active_subnets)
                 
                 if year_rewards:
-                    yearly_avg[f'Year {year}'] = np.mean(year_rewards)
+                    avg_monthly = np.mean(year_rewards)
+                    avg_subnets_that_year = np.mean(subnet_counts)
+                    total_annual = total_yearly_rewards / max(avg_subnets_that_year, 1)
+                    
+                    yearly_metrics[f'Year {year}'] = {
+                        'avg_monthly': avg_monthly,
+                        'total_annual': total_annual
+                    }
                 else:
-                    yearly_avg[f'Year {year}'] = 0
+                    yearly_metrics[f'Year {year}'] = {
+                        'avg_monthly': 0,
+                        'total_annual': 0
+                    }
             
-            return yearly_avg
+            return yearly_metrics
         
-        # Calculate yearly averages for each scenario
-        bear_yearly = calculate_yearly_avg_reward(fee_results_bear, emission_schedule)
-        neutral_yearly = calculate_yearly_avg_reward(fee_results_neutral, emission_schedule)
-        bull_yearly = calculate_yearly_avg_reward(fee_results_bull, emission_schedule)
+        # Calculate yearly earnings for each scenario
+        bear_yearly = calculate_yearly_earnings(fee_results_bear, emission_schedule)
+        neutral_yearly = calculate_yearly_earnings(fee_results_neutral, emission_schedule)
+        bull_yearly = calculate_yearly_earnings(fee_results_bull, emission_schedule)
         
         # Display yearly breakdown in columns with both BRB and USD values
         col1, col2, col3 = st.columns(3)
         
         def display_earnings_metrics(yearly_data, token_price):
-            """Display earnings metrics in both BRB and USD with improved formatting"""
-            st.markdown("##### Annual Earnings per Subnet")
+            """Display both average monthly and total annual earnings metrics"""
+            st.markdown("##### Average Monthly Earnings per Subnet")
             
             # Create two columns for the headers
             brb_col, usd_col = st.columns(2)
@@ -1215,15 +1275,39 @@ with tab2:
             with usd_col:
                 st.markdown("**USD**")
             
-            # Display each year's data
-            for year, avg_reward in yearly_data.items():
-                usd_value = avg_reward * token_price
+            # Display each year's average monthly data
+            for year, metrics in yearly_data.items():
+                avg_monthly = metrics['avg_monthly']
+                usd_value = avg_monthly * token_price
                 
                 # Create columns for this year's values
                 year_brb_col, year_usd_col = st.columns(2)
                 
                 with year_brb_col:
-                    st.markdown(f"**{year}:** {avg_reward:,.0f}")
+                    st.markdown(f"**{year}:** {avg_monthly:,.0f}")
+                with year_usd_col:
+                    st.markdown(f"${usd_value:,.2f}")
+            
+            st.markdown("---")
+            st.markdown("##### Total Annual Earnings per Subnet")
+            
+            # Create two columns for the headers
+            brb_col, usd_col = st.columns(2)
+            with brb_col:
+                st.markdown("**BRB**")
+            with usd_col:
+                st.markdown("**USD**")
+            
+            # Display each year's total annual data
+            for year, metrics in yearly_data.items():
+                total_annual = metrics['total_annual']
+                usd_value = total_annual * token_price
+                
+                # Create columns for this year's values
+                year_brb_col, year_usd_col = st.columns(2)
+                
+                with year_brb_col:
+                    st.markdown(f"**{year}:** {total_annual:,.0f}")
                 with year_usd_col:
                     st.markdown(f"${usd_value:,.2f}")
         
