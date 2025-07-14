@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
-from emissions_model import BitRobotEmissionsModel
-from fee_simulation import run_fee_simulation
+from bitrobot_supply_model import BitRobotSupplyModel
 
 # Configure Streamlit for widescreen mode
 st.set_page_config(
@@ -19,6 +18,132 @@ st.markdown("Simulate and visualize the BitRobot token emissions schedule and su
 
 # Sidebar for parameters
 st.sidebar.header("Configuration")
+
+# Emissions Schedule Configuration Expander
+with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
+    emissions_schedule_type = st.selectbox(
+        "Emissions Schedule Type",
+        ["static", "linear", "exponential"],
+        index=2,
+        help="Choose the static emissions schedule type."
+    )
+
+    # Static schedule parameters (only show if static is selected)
+    if emissions_schedule_type == "static":
+        static_year1 = st.number_input(
+            "Year 1 Emission (tokens)",
+            value=80_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit in year 1 (months 1-12)."
+        )
+        static_year2 = st.number_input(
+            "Year 2 Emission (tokens)",
+            value=64_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit in year 2 (months 13-24)."
+        )
+        static_year3 = st.number_input(
+            "Year 3 Emission (tokens)",
+            value=40_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit in year 3 (months 25-36)."
+        )
+        static_year4 = st.number_input(
+            "Year 4 Emission (tokens)",
+            value=16_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit in year 4 (months 37-48)."
+        )
+    else:
+        static_year1 = 80_000_000
+        static_year2 = 64_000_000
+        static_year3 = 40_000_000
+        static_year4 = 16_000_000
+
+    # Linear schedule parameters (only show if linear is selected)
+    if emissions_schedule_type == "linear":
+        linear_total_emissions = st.number_input(
+            "Linear Total Emissions (tokens)",
+            value=200_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit over 48 months for linear schedule."
+        )
+        
+        linear_start_emission = st.number_input(
+            "Linear Start Emission (per month, tokens)",
+            value=12_000_000,
+            min_value=0,
+            max_value=50_000_000,
+            step=100_000,
+            help="Starting monthly emission for linear schedule."
+        )
+        linear_end_emission = st.number_input(
+            "Linear End Emission (per month, tokens)",
+            value=2_000_000,
+            min_value=0,
+            max_value=50_000_000,
+            step=100_000,
+            help="Ending monthly emission for linear schedule."
+        )
+        
+        # Calculate what the actual total would be with current start/end values
+        raw_total = (linear_start_emission + linear_end_emission) * 48 / 2
+        
+        # Show if values need adjustment
+        if abs(raw_total - linear_total_emissions) > 1_000_000:  # Allow 1M tolerance
+            st.warning(f"⚠️ Start/end values will be automatically scaled to achieve {linear_total_emissions:,.0f} total emissions")
+            st.caption(f"Raw calculation: {raw_total:,.0f} tokens")
+        else:
+            st.success(f"✅ Start/end values will achieve {linear_total_emissions:,.0f} total emissions")
+    else:
+        linear_start_emission = 12_000_000
+        linear_end_emission = 2_000_000
+        linear_total_emissions = 200_000_000
+
+    # Exponential schedule parameters (only show if exponential is selected)
+    if emissions_schedule_type == "exponential":
+        exponential_start_emission = st.number_input(
+            "Exponential Start Emission (per month, tokens)",
+            value=12_000_000,
+            min_value=0,
+            max_value=50_000_000,
+            step=100_000,
+            help="Starting monthly emission for exponential decay schedule."
+        )
+        exponential_end_emission = st.number_input(
+            "Exponential End Emission (per month, tokens)",
+            value=2_000_000,
+            min_value=0,
+            max_value=50_000_000,
+            step=100_000,
+            help="Ending monthly emission for exponential decay schedule."
+        )
+        
+        # Calculate and display total emissions for exponential schedule
+        # For exponential decay, we need to sum the actual curve
+        # This is an approximation: total ≈ (start + end) * 48 / 2 * adjustment_factor
+        # The adjustment factor accounts for the curve shape
+        if exponential_start_emission > 0 and exponential_end_emission > 0:
+            decay_rate = -np.log(exponential_end_emission / exponential_start_emission) / 47
+            # Calculate actual total by summing the curve
+            total_emissions = 0
+            for month in range(1, 49):
+                emission = exponential_start_emission * np.exp(-decay_rate * (month - 1))
+                total_emissions += emission
+            st.info(f"**Exponential Schedule Total:** {total_emissions:,.0f} tokens over 48 months")
+    else:
+        exponential_start_emission = 12_000_000
+        exponential_end_emission = 2_000_000
 
 # Create tabs
 tab1, tab2 = st.tabs(["Emissions Schedule", "Fee Simulation"])
@@ -155,6 +280,26 @@ with tab1:
             key="subnet_maintenance_fee_pct"
         )
         
+        subnet_collateral_amount = st.number_input(
+            "Subnet Collateral Amount (tokens)", 
+            value=100_000, 
+            min_value=0,
+            max_value=1_000_000,
+            step=10_000,
+            help="Amount of tokens required as collateral per subnet",
+            key="subnet_collateral_amount"
+        )
+        
+        staking_percentage = st.slider(
+            "Staking Percentage (% of Total Supply)", 
+            value=10.0,
+            min_value=0.0,
+            max_value=50.0,
+            step=0.5,
+            help="Percentage of total supply that users choose to stake",
+            key="staking_percentage"
+        )
+        
         st.subheader("Scenario Parameters")
         
         # Shared starting parameters
@@ -193,9 +338,9 @@ with tab1:
         with col2:
             subnet_lifetime = st.number_input(
                 "Subnet Lifetime (months)", 
-                value=24, 
+                value=36, 
                 min_value=1, 
-                max_value=60,
+                max_value=120,
                 help="How long subnets stay active before expiring",
                 key="subnet_lifetime"
             )
@@ -269,100 +414,85 @@ with tab1:
     # Run simulation button
     if st.sidebar.button("Run Simulation", type="primary"):
         with st.spinner("Running emissions and fee simulations..."):
-            # Initialize and run the emissions model
-            model = BitRobotEmissionsModel(
-                team_allocation=team_allocation,
-                investor_allocation=investor_allocation,
-                foundation_allocation=foundation_allocation,
-                foundation_initial_liquidity=foundation_initial_liquidity,
-                foundation_target_48m=foundation_allocation,
-                team_cliff_months=team_cliff_months,
-                team_vesting_months=team_vesting_months,
-                foundation_vesting_months=foundation_vesting_months,
-                t_burn=t_burn,
-                burn_emission_factor=burn_emission_factor,
-                burn_coefficient=burn_coefficient,
-                burn_pattern=burn_pattern,
-                simulation_months=simulation_months
-            )
+            # Run three scenarios: bear, neutral, and bull
+            models = {}
+            results_dfs = {}
             
-            model.run_simulation()
-            results_df = model.get_results_dataframe()
+            # Common parameters for all scenarios
+            common_params = {
+                'team_allocation': team_allocation,
+                'investor_allocation': investor_allocation,
+                'foundation_allocation': foundation_allocation,
+                'foundation_initial_liquidity': foundation_initial_liquidity,
+                'foundation_target_48m': foundation_allocation,
+                'team_cliff_months': team_cliff_months,
+                'team_vesting_months': team_vesting_months,
+                'foundation_vesting_months': foundation_vesting_months,
+                't_burn': t_burn,
+                'burn_emission_factor': burn_emission_factor,
+                'burn_coefficient': burn_coefficient,
+                'burn_pattern': burn_pattern,
+                'simulation_months': simulation_months,
+                'emissions_schedule_type': emissions_schedule_type,
+                'linear_start_emission': linear_start_emission,
+                'linear_end_emission': linear_end_emission,
+                'linear_total_emissions': linear_total_emissions,
+                'static_year1': static_year1,
+                'static_year2': static_year2,
+                'static_year3': static_year3,
+                'static_year4': static_year4,
+                'exponential_start_emission': exponential_start_emission,
+                'exponential_end_emission': exponential_end_emission,
+                'starting_ents': st.session_state.starting_ents,
+                'starting_subnets': st.session_state.starting_subnets,
+                'ent_lifetime': st.session_state.ent_lifetime,
+                'subnet_lifetime': st.session_state.subnet_lifetime,
+                'F_base_ent': st.session_state.F_base_ent,
+                'F_base_subnet': st.session_state.F_base_subnet,
+                'subnet_maintenance_fee_pct': st.session_state.subnet_maintenance_fee_pct / 100.0,
+                'subnet_collateral_amount': st.session_state.subnet_collateral_amount,
+                'staking_percentage': st.session_state.staking_percentage / 100.0
+            }
             
-            # Store emissions results in session state
-            st.session_state.results_df = results_df
-            st.session_state.model = model
+            # Bear scenario (lower growth)
+            bear_params = common_params.copy()
+            bear_params.update({
+                'lambda_ent': st.session_state.lambda_ent_bear,
+                'lambda_subnet': st.session_state.lambda_subnet_bear,
+                'random_seed': 42
+            })
+            models['bear'] = BitRobotSupplyModel(**bear_params)
+            models['bear'].run_simulation()
+            results_dfs['bear'] = models['bear'].get_results_dataframe()
             
-            # Run fee simulation using the emission schedule
-            emission_schedule = results_df['Emissions'].values
+            # Neutral scenario (baseline growth)
+            neutral_params = common_params.copy()
+            neutral_params.update({
+                'lambda_ent': st.session_state.lambda_ent_neutral,
+                'lambda_subnet': st.session_state.lambda_subnet_neutral,
+                'random_seed': 43
+            })
+            models['neutral'] = BitRobotSupplyModel(**neutral_params)
+            models['neutral'].run_simulation()
+            results_dfs['neutral'] = models['neutral'].get_results_dataframe()
             
-            # Get fee simulation parameters from sidebar
-            F_base_ent = st.session_state.F_base_ent
-            F_base_subnet = st.session_state.F_base_subnet
-            subnet_maintenance_fee_pct = st.session_state.subnet_maintenance_fee_pct / 100.0
-            lambda_ent_bear = st.session_state.lambda_ent_bear
-            lambda_subnet_bear = st.session_state.lambda_subnet_bear
-            starting_ents = st.session_state.starting_ents
-            starting_subnets = st.session_state.starting_subnets
-            lambda_ent_neutral = st.session_state.lambda_ent_neutral
-            lambda_subnet_neutral = st.session_state.lambda_subnet_neutral
-            lambda_ent_bull = st.session_state.lambda_ent_bull
-            lambda_subnet_bull = st.session_state.lambda_subnet_bull
-            ent_lifetime = st.session_state.ent_lifetime
-            subnet_lifetime = st.session_state.subnet_lifetime
+            # Bull scenario (higher growth)
+            bull_params = common_params.copy()
+            bull_params.update({
+                'lambda_ent': st.session_state.lambda_ent_bull,
+                'lambda_subnet': st.session_state.lambda_subnet_bull,
+                'random_seed': 44
+            })
+            models['bull'] = BitRobotSupplyModel(**bull_params)
+            models['bull'].run_simulation()
+            results_dfs['bull'] = models['bull'].get_results_dataframe()
             
-            # Run the fee simulation for all scenarios
-            fee_results_bear = run_fee_simulation(
-                epochs=len(emission_schedule),
-                emission_schedule=emission_schedule,
-                lambda_ent=lambda_ent_bear,
-                lambda_subnet=lambda_subnet_bear,
-                starting_ents=starting_ents,
-                starting_subnets=starting_subnets,
-                F_base_ent=F_base_ent,
-                F_base_subnet=F_base_subnet,
-                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
-                ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime,
-                random_seed=42  # Bear scenario seed
-            )
+            # Store results in session state
+            st.session_state.results_dfs = results_dfs
+            st.session_state.models = models
+            st.session_state.results_df = results_dfs['neutral']  # Default to neutral for main tab
             
-            fee_results_neutral = run_fee_simulation(
-                epochs=len(emission_schedule),
-                emission_schedule=emission_schedule,
-                lambda_ent=lambda_ent_neutral,
-                lambda_subnet=lambda_subnet_neutral,
-                starting_ents=starting_ents,
-                starting_subnets=starting_subnets,
-                F_base_ent=F_base_ent,
-                F_base_subnet=F_base_subnet,
-                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
-                ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime,
-                random_seed=43  # Neutral scenario seed
-            )
-            
-            fee_results_bull = run_fee_simulation(
-                epochs=len(emission_schedule),
-                emission_schedule=emission_schedule,
-                lambda_ent=lambda_ent_bull,
-                lambda_subnet=lambda_subnet_bull,
-                starting_ents=starting_ents,
-                starting_subnets=starting_subnets,
-                F_base_ent=F_base_ent,
-                F_base_subnet=F_base_subnet,
-                subnet_maintenance_fee_pct=subnet_maintenance_fee_pct,
-                ent_lifetime=ent_lifetime,
-                subnet_lifetime=subnet_lifetime,
-                random_seed=44  # Bull scenario seed
-            )
-            
-            # Store fee results in session state
-            st.session_state.fee_results_bear = fee_results_bear
-            st.session_state.fee_results_neutral = fee_results_neutral
-            st.session_state.fee_results_bull = fee_results_bull
-            
-            st.success("Both simulations completed!")
+            st.success("Multi-scenario simulation completed!")
     
     # Display plots if results are available
     if 'results_df' in st.session_state:
@@ -468,8 +598,8 @@ with tab1:
         for i, month in enumerate(results_df['Month']):
             cumulative_data.append({
                 'Month': month,
-                'Component': 'Foundation',
-                'Amount': results_df['Foundation Vested'].iloc[i] / 1e9
+                'Component': 'Community',
+                'Amount': results_df['Cumulative Fixed Emissions'].iloc[i] / 1e9
             })
             cumulative_data.append({
                 'Month': month,
@@ -478,13 +608,13 @@ with tab1:
             })
             cumulative_data.append({
                 'Month': month,
-                'Component': 'Emissions',
-                'Amount': results_df['Emissions'].cumsum().iloc[i] / 1e9
+                'Component': 'Investors',
+                'Amount': results_df['Investor Vested'].iloc[i] / 1e9
             })
             cumulative_data.append({
                 'Month': month,
-                'Component': 'Burn',
-                'Amount': results_df['Burn'].cumsum().iloc[i] / 1e9
+                'Component': 'Foundation & Ecosystem Growth',
+                'Amount': results_df['Foundation Vested'].iloc[i] / 1e9
             })
             cumulative_data.append({
                 'Month': month,
@@ -497,7 +627,7 @@ with tab1:
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Amount:Q', title='BRB (Billions)'),
             color=alt.Color('Component:N', scale=alt.Scale(
-                domain=['Foundation & Ecosystem Growth', 'Team', 'Emissions', 'Burn', 'Circulating Supply'],
+                domain=['Community', 'Team', 'Investors', 'Foundation & Ecosystem Growth', 'Circulating Supply'],
                 range=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
             ))
         ).properties(
@@ -642,72 +772,73 @@ with tab2:
         token_price = st.slider(
             "BRB Token Price ($)",
             min_value=0.01,
-            max_value=10.0,
-            value=1.0,
+            max_value=5.0,
+            value=0.10,
             step=0.01,
             help="Set the BRB token price in USD"
         )
     
-    # Check if we have fee simulation results
-    if 'fee_results_bear' not in st.session_state:
+    # Check if we have simulation results with integrated fee data
+    if 'results_dfs' not in st.session_state:
         st.info("Please run the simulation in the 'Emissions Schedule' tab to generate fee analysis plots.")
     else:
-        st.info("Fee simulation based on the emissions schedule from the first tab.")
+        st.info("Fee simulation based on the integrated supply model with multiple scenarios.")
         
         # Store token price in session state for dynamic updates
         st.session_state.token_price = token_price
         
-        # Display fee simulation results
-        fee_results_bear = st.session_state.fee_results_bear
-        fee_results_neutral = st.session_state.fee_results_neutral
-        fee_results_bull = st.session_state.fee_results_bull
+        # Get integrated fee data from all scenarios
+        results_dfs = st.session_state.results_dfs
+        bear_df = results_dfs['bear']
+        neutral_df = results_dfs['neutral']
+        bull_df = results_dfs['bull']
         
         # Plot 1: Active ENTs and Subnets Over Time (all scenarios)
         active_entities_data = []
         
         # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
+        for i, month in enumerate(bear_df['Month']):
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Type': 'Active ENTs',
-                'Count': fee_results_bear['active_ENTs'].iloc[i]
+                'Count': bear_df['Active ENTs'].iloc[i]
             })
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Type': 'Active Subnets',
-                'Count': fee_results_bear['active_subnets'].iloc[i]
+                'Count': bear_df['Active Subnets'].iloc[i]
             })
         
         # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
+        for i, month in enumerate(neutral_df['Month']):
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Type': 'Active ENTs',
-                'Count': fee_results_neutral['active_ENTs'].iloc[i]
+                'Count': neutral_df['Active ENTs'].iloc[i]
             })
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Type': 'Active Subnets',
-                'Count': fee_results_neutral['active_subnets'].iloc[i]
+                'Count': neutral_df['Active Subnets'].iloc[i]
             })
         
         # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
+        for i, month in enumerate(bull_df['Month']):
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Type': 'Active ENTs',
-                'Count': fee_results_bull['active_ENTs'].iloc[i]
+                'Count': bull_df['Active ENTs'].iloc[i]
             })
             active_entities_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Type': 'Active Subnets',
-                'Count': fee_results_bull['active_subnets'].iloc[i]
+                'Count': bull_df['Active Subnets'].iloc[i]
             })
         
         active_entities_data = pd.DataFrame(active_entities_data)
@@ -718,7 +849,7 @@ with tab2:
         
         # Create chart for Active ENTs
         active_ents_chart = alt.Chart(active_ents_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
+            x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Count:Q', title='Count'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
@@ -734,7 +865,7 @@ with tab2:
         
         # Create chart for Active Subnets
         active_subnets_chart = alt.Chart(active_subnets_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
+            x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Count:Q', title='Count'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
@@ -773,73 +904,73 @@ with tab2:
         fee_categories_data = []
         
         # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
+        for i, month in enumerate(bear_df['Month']):
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Type': 'ENT Registration',
-                'Amount': fee_results_bear['fees_ENT_reg'].iloc[i]
+                'Amount': bear_df['ENT Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Type': 'Subnet Registration',
-                'Amount': fee_results_bear['fees_subnet_reg'].iloc[i]
+                'Amount': bear_df['Subnet Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Type': 'Subnet Maintenance',
-                'Amount': fee_results_bear['fees_subnet_maint'].iloc[i]
+                'Amount': bear_df['Subnet Maintenance Fees'].iloc[i]
             })
         
         # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
+        for i, month in enumerate(neutral_df['Month']):
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Type': 'ENT Registration',
-                'Amount': fee_results_neutral['fees_ENT_reg'].iloc[i]
+                'Amount': neutral_df['ENT Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Type': 'Subnet Registration',
-                'Amount': fee_results_neutral['fees_subnet_reg'].iloc[i]
+                'Amount': neutral_df['Subnet Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Type': 'Subnet Maintenance',
-                'Amount': fee_results_neutral['fees_subnet_maint'].iloc[i]
+                'Amount': neutral_df['Subnet Maintenance Fees'].iloc[i]
             })
         
         # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
+        for i, month in enumerate(bull_df['Month']):
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Type': 'ENT Registration',
-                'Amount': fee_results_bull['fees_ENT_reg'].iloc[i]
+                'Amount': bull_df['ENT Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Type': 'Subnet Registration',
-                'Amount': fee_results_bull['fees_subnet_reg'].iloc[i]
+                'Amount': bull_df['Subnet Registration Fees'].iloc[i]
             })
             fee_categories_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Type': 'Subnet Maintenance',
-                'Amount': fee_results_bull['fees_subnet_maint'].iloc[i]
+                'Amount': bull_df['Subnet Maintenance Fees'].iloc[i]
             })
         
         fee_categories_data = pd.DataFrame(fee_categories_data)
         
         fee_categories_chart = alt.Chart(fee_categories_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Amount:Q', title='$BRB'),
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Amount:Q', title='Fees (BRB)'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
@@ -874,34 +1005,34 @@ with tab2:
         cumulative_fees_data = []
         
         # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
+        for i, month in enumerate(bear_df['Month']):
             cumulative_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
-                'Cumulative Fees': fee_results_bear['total_fees'].cumsum().iloc[i]
+                'Cumulative Fees': bear_df['Cumulative Fees'].iloc[i]
             })
         
         # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
+        for i, month in enumerate(neutral_df['Month']):
             cumulative_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
-                'Cumulative Fees': fee_results_neutral['total_fees'].cumsum().iloc[i]
+                'Cumulative Fees': neutral_df['Cumulative Fees'].iloc[i]
             })
         
         # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
+        for i, month in enumerate(bull_df['Month']):
             cumulative_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
-                'Cumulative Fees': fee_results_bull['total_fees'].cumsum().iloc[i]
+                'Cumulative Fees': bull_df['Cumulative Fees'].iloc[i]
             })
         
         cumulative_fees_data = pd.DataFrame(cumulative_fees_data)
         
         cumulative_fees_chart = alt.Chart(cumulative_fees_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Cumulative Fees:Q', title='$BRB'),
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Cumulative Fees:Q', title='Cumulative Fees (BRB)'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
@@ -932,34 +1063,34 @@ with tab2:
         total_fees_data = []
         
         # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
+        for i, month in enumerate(bear_df['Month']):
             total_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
-                'Total Fees': fee_results_bear['total_fees'].iloc[i]
+                'Total Fees': bear_df['Total Fees'].iloc[i]
             })
         
         # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
+        for i, month in enumerate(neutral_df['Month']):
             total_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
-                'Total Fees': fee_results_neutral['total_fees'].iloc[i]
+                'Total Fees': neutral_df['Total Fees'].iloc[i]
             })
         
         # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
+        for i, month in enumerate(bull_df['Month']):
             total_fees_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
-                'Total Fees': fee_results_bull['total_fees'].iloc[i]
+                'Total Fees': bull_df['Total Fees'].iloc[i]
             })
         
         total_fees_data = pd.DataFrame(total_fees_data)
         
         total_fees_chart = alt.Chart(total_fees_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Total Fees:Q', title='$BRB'),
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Total Fees:Q', title='Total Fees (BRB)'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
@@ -989,38 +1120,35 @@ with tab2:
         # Plot 5: Average Reward per Subnet (all scenarios)
         avg_reward_data = []
         
-        # Get emission schedule from results
-        emission_schedule = results_df['Emissions'].values
-        
         # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
-            active_subnets = fee_results_bear['active_subnets'].iloc[i]
-            monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+        for i, month in enumerate(bear_df['Month']):
+            active_subnets = bear_df['Active Subnets'].iloc[i]
+            monthly_emission = bear_df['Emissions'].iloc[i]
             avg_reward = monthly_emission / max(active_subnets, 1)  # Avoid division by zero
             avg_reward_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bearish',
                 'Avg Reward per Subnet': avg_reward
             })
         
         # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
-            active_subnets = fee_results_neutral['active_subnets'].iloc[i]
-            monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+        for i, month in enumerate(neutral_df['Month']):
+            active_subnets = neutral_df['Active Subnets'].iloc[i]
+            monthly_emission = neutral_df['Emissions'].iloc[i]
             avg_reward = monthly_emission / max(active_subnets, 1)  # Avoid division by zero
             avg_reward_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Neutral',
                 'Avg Reward per Subnet': avg_reward
             })
         
         # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
-            active_subnets = fee_results_bull['active_subnets'].iloc[i]
-            monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+        for i, month in enumerate(bull_df['Month']):
+            active_subnets = bull_df['Active Subnets'].iloc[i]
+            monthly_emission = bull_df['Emissions'].iloc[i]
             avg_reward = monthly_emission / max(active_subnets, 1)  # Avoid division by zero
             avg_reward_data.append({
-                'Epoch': epoch,
+                'Month': month,
                 'Scenario': 'Bullish',
                 'Avg Reward per Subnet': avg_reward
             })
@@ -1028,11 +1156,11 @@ with tab2:
         avg_reward_data = pd.DataFrame(avg_reward_data)
         
         # Filter to start from month 1
-        avg_reward_data = avg_reward_data[avg_reward_data['Epoch'] >= 1]
+        avg_reward_data = avg_reward_data[avg_reward_data['Month'] >= 1]
         
         avg_reward_chart = alt.Chart(avg_reward_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Avg Reward per Subnet:Q', title='$BRB'),
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Avg Reward per Subnet:Q', title='Avg Reward per Subnet (BRB)'),
             color=alt.Color('Scenario:N', scale=alt.Scale(
                 domain=['Bearish', 'Neutral', 'Bullish'],
                 range=['#d62728', '#2ca02c', '#1f77b4']
@@ -1059,56 +1187,43 @@ with tab2:
             titlePadding=10
         )
         
-        # Plot 6: Cumulative Fees as Fraction of Circulating Supply (all scenarios)
-        fees_fraction_data = []
+        # Plot 6: Locked Supply Over Time (Neutral Scenario - Component Breakdown)
+        locked_supply_data = []
         
-        # Get circulating supply from results
-        circulating_supply = results_df['Circulating Supply'].values
-        
-        # Bearish scenario
-        for i, epoch in enumerate(fee_results_bear['epoch']):
-            cumulative_fees = fee_results_bear['total_fees'].cumsum().iloc[i]
-            circulating_supply_at_epoch = circulating_supply[i] if i < len(circulating_supply) else circulating_supply[-1]
-            fraction = (cumulative_fees / max(circulating_supply_at_epoch, 1)) * 100  # Convert to percentage
-            fees_fraction_data.append({
-                'Epoch': epoch,
-                'Scenario': 'Bearish',
-                'Fees as % of Circulating Supply': fraction
+        # Neutral scenario only - component breakdown
+        for i, month in enumerate(neutral_df['Month']):
+            locked_supply_data.append({
+                'Month': month,
+                'Type': 'Collateral',
+                'Amount': neutral_df['Locked Collateral'].iloc[i] / 1e6  # Convert to millions
+            })
+            locked_supply_data.append({
+                'Month': month,
+                'Type': 'Staking',
+                'Amount': neutral_df['Staking Supply'].iloc[i] / 1e6  # Convert to millions
+            })
+            locked_supply_data.append({
+                'Month': month,
+                'Type': 'Total',
+                'Amount': neutral_df['Total Locked Supply'].iloc[i] / 1e6  # Convert to millions
             })
         
-        # Neutral scenario
-        for i, epoch in enumerate(fee_results_neutral['epoch']):
-            cumulative_fees = fee_results_neutral['total_fees'].cumsum().iloc[i]
-            circulating_supply_at_epoch = circulating_supply[i] if i < len(circulating_supply) else circulating_supply[-1]
-            fraction = (cumulative_fees / max(circulating_supply_at_epoch, 1)) * 100  # Convert to percentage
-            fees_fraction_data.append({
-                'Epoch': epoch,
-                'Scenario': 'Neutral',
-                'Fees as % of Circulating Supply': fraction
-            })
+        locked_supply_data = pd.DataFrame(locked_supply_data)
         
-        # Bullish scenario
-        for i, epoch in enumerate(fee_results_bull['epoch']):
-            cumulative_fees = fee_results_bull['total_fees'].cumsum().iloc[i]
-            circulating_supply_at_epoch = circulating_supply[i] if i < len(circulating_supply) else circulating_supply[-1]
-            fraction = (cumulative_fees / max(circulating_supply_at_epoch, 1)) * 100  # Convert to percentage
-            fees_fraction_data.append({
-                'Epoch': epoch,
-                'Scenario': 'Bullish',
-                'Fees as % of Circulating Supply': fraction
-            })
-        
-        fees_fraction_data = pd.DataFrame(fees_fraction_data)
-        
-        fees_fraction_chart = alt.Chart(fees_fraction_data).mark_line().encode(
-            x=alt.X('Epoch:Q', title='Month'),
-            y=alt.Y('Fees as % of Circulating Supply:Q', title='% of Circulating Supply'),
-            color=alt.Color('Scenario:N', scale=alt.Scale(
-                domain=['Bearish', 'Neutral', 'Bullish'],
-                range=['#d62728', '#2ca02c', '#1f77b4']
-            ))
+        locked_supply_chart = alt.Chart(locked_supply_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Amount:Q', title='Locked Supply (Millions BRB)'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Collateral', 'Staking', 'Total'],
+                range=['#ff7f0e', '#9467bd', '#2ca02c']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Total',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
         ).properties(
-            title='Cumulative Fees as % of Circulating Supply',
+            title='Locked Supply Over Time (Neutral Scenario)',
             width=450,
             height=300
         ).add_params(
@@ -1122,14 +1237,64 @@ with tab2:
             strokeWidth=2
         ).encode(x='x:Q')
 
-        fees_fraction_chart = alt.layer(fees_fraction_chart, vertical_line).configure_view(
+        locked_supply_chart = alt.layer(locked_supply_chart, vertical_line).configure_view(
             strokeWidth=0
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
         )
         
-        # Display charts in a 2x2 grid
+        # Plot 6b: Total Locked Supply Over Time (All Scenarios)
+        total_locked_supply_data = []
+        
+        # All scenarios - total locked supply only
+        for i, month in enumerate(bear_df['Month']):
+            total_locked_supply_data.append({
+                'Month': month,
+                'Scenario': 'Bearish',
+                'Total Locked Supply': bear_df['Total Locked Supply'].iloc[i] / 1e6  # Convert to millions
+            })
+        
+        for i, month in enumerate(neutral_df['Month']):
+            total_locked_supply_data.append({
+                'Month': month,
+                'Scenario': 'Neutral',
+                'Total Locked Supply': neutral_df['Total Locked Supply'].iloc[i] / 1e6  # Convert to millions
+            })
+        
+        for i, month in enumerate(bull_df['Month']):
+            total_locked_supply_data.append({
+                'Month': month,
+                'Scenario': 'Bullish',
+                'Total Locked Supply': bull_df['Total Locked Supply'].iloc[i] / 1e6  # Convert to millions
+            })
+        
+        total_locked_supply_data = pd.DataFrame(total_locked_supply_data)
+        
+        total_locked_supply_chart = alt.Chart(total_locked_supply_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Total Locked Supply:Q', title='M-BRB'),
+            color=alt.Color('Scenario:N', scale=alt.Scale(
+                domain=['Bearish', 'Neutral', 'Bullish'],
+                range=['#d62728', '#2ca02c', '#1f77b4']
+            ))
+        ).properties(
+            title='Total Locked Supply Over Time (All Scenarios)',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+
+        # Add vertical line at month 48
+        total_locked_supply_chart = alt.layer(total_locked_supply_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        # Display charts in a 2x3 grid
         col1, col2 = st.columns(2)
         
         with col1:
@@ -1152,59 +1317,210 @@ with tab2:
             st.altair_chart(total_fees_chart, use_container_width=True)
         
         with col6:
-            st.altair_chart(fees_fraction_chart, use_container_width=True)
-        
-        with col6:
             st.altair_chart(avg_reward_chart, use_container_width=True)
         
+        # Add the locked collateral chart in a new row
+        col7, col8 = st.columns(2)
+        
+        with col7:
+            st.altair_chart(locked_supply_chart, use_container_width=True)
+        
+        # Plot 7: Locked Supply as % of Circulating Supply (Neutral Scenario - Component Breakdown)
+        locked_pct_data = []
+        
+        # Neutral scenario only - component breakdown
+        for i, month in enumerate(neutral_df['Month']):
+            circulating = neutral_df['Circulating Supply'].iloc[i]
+            collateral = neutral_df['Locked Collateral'].iloc[i]
+            staking = neutral_df['Staking Supply'].iloc[i]
+            total_locked = neutral_df['Total Locked Supply'].iloc[i]
+            
+            collateral_pct = 100 * collateral / circulating if circulating > 0 else 0
+            staking_pct = 100 * staking / circulating if circulating > 0 else 0
+            total_pct = 100 * total_locked / circulating if circulating > 0 else 0
+            
+            locked_pct_data.append({
+                'Month': month,
+                'Type': 'Collateral',
+                'Percentage': collateral_pct
+            })
+            locked_pct_data.append({
+                'Month': month,
+                'Type': 'Staking',
+                'Percentage': staking_pct
+            })
+            locked_pct_data.append({
+                'Month': month,
+                'Type': 'Total',
+                'Percentage': total_pct
+            })
+        locked_pct_data = pd.DataFrame(locked_pct_data)
+        
+        locked_pct_chart = alt.Chart(locked_pct_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Percentage:Q', title='%'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Collateral', 'Staking', 'Total'],
+                range=['#ff7f0e', '#9467bd', '#2ca02c']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Total',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
+        ).properties(
+            title='Locked / CircSupply (Neutral Scenario)',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at month 48
+        vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
+            strokeDash=[5, 5],
+            color='gray',
+            strokeWidth=2
+        ).encode(x='x:Q')
+        
+        locked_pct_chart = alt.layer(locked_pct_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        # Plot 7b: Total Locked Supply as % of Circulating Supply (All Scenarios)
+        total_locked_pct_data = []
+        
+        # All scenarios - total locked supply percentage only
+        for i, month in enumerate(bear_df['Month']):
+            circulating = bear_df['Circulating Supply'].iloc[i]
+            total_locked = bear_df['Total Locked Supply'].iloc[i]
+            total_pct = 100 * total_locked / circulating if circulating > 0 else 0
+            
+            total_locked_pct_data.append({
+                'Month': month,
+                'Scenario': 'Bearish',
+                'Total Locked %': total_pct
+            })
+        
+        for i, month in enumerate(neutral_df['Month']):
+            circulating = neutral_df['Circulating Supply'].iloc[i]
+            total_locked = neutral_df['Total Locked Supply'].iloc[i]
+            total_pct = 100 * total_locked / circulating if circulating > 0 else 0
+            
+            total_locked_pct_data.append({
+                'Month': month,
+                'Scenario': 'Neutral',
+                'Total Locked %': total_pct
+            })
+        
+        for i, month in enumerate(bull_df['Month']):
+            circulating = bull_df['Circulating Supply'].iloc[i]
+            total_locked = bull_df['Total Locked Supply'].iloc[i]
+            total_pct = 100 * total_locked / circulating if circulating > 0 else 0
+            
+            total_locked_pct_data.append({
+                'Month': month,
+                'Scenario': 'Bullish',
+                'Total Locked %': total_pct
+            })
+        
+        total_locked_pct_data = pd.DataFrame(total_locked_pct_data)
+        
+        total_locked_pct_chart = alt.Chart(total_locked_pct_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Total Locked %:Q', title='%'),
+            color=alt.Color('Scenario:N', scale=alt.Scale(
+                domain=['Bearish', 'Neutral', 'Bullish'],
+                range=['#d62728', '#2ca02c', '#1f77b4']
+            ))
+        ).properties(
+            title='Total Locked % of Circulating Supply (All Scenarios)',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+
+        # Add vertical line at month 48
+        total_locked_pct_chart = alt.layer(total_locked_pct_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        with col8:
+            st.altair_chart(locked_pct_chart, use_container_width=True)
+        
+        # Add the total locked supply charts in another row
+        col9, col10 = st.columns(2)
+        
+        with col9:
+            st.altair_chart(total_locked_supply_chart, use_container_width=True)
+        
+        with col10:
+            st.altair_chart(total_locked_pct_chart, use_container_width=True)
+
         # Display summary statistics for all scenarios
         st.subheader("Fee Simulation Summary by Scenario")
         col1, col2, col3 = st.columns(3)
         
         with col1:
             st.write("**Bearish Scenario**")
-            st.metric("Total Fees", f"{fee_results_bear['total_fees'].sum():.0f} BRB")
-            st.metric("Avg Monthly Fees", f"{fee_results_bear['total_fees'].mean():.1f} BRB")
-            st.metric("Peak ENTs", f"{fee_results_bear['active_ENTs'].max():.0f}")
-            st.metric("Peak Subnets", f"{fee_results_bear['active_subnets'].max():.0f}")
+            st.metric("Total Fees", f"{bear_df['Total Fees'].sum():.0f} BRB")
+            st.metric("Avg Monthly Fees", f"{bear_df['Total Fees'].mean():.1f} BRB")
+            st.metric("Peak ENTs", f"{bear_df['Active ENTs'].max():.0f}")
+            st.metric("Peak Subnets", f"{bear_df['Active Subnets'].max():.0f}")
+            st.metric("Peak Locked Collateral", f"{bear_df['Locked Collateral'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Staking Supply", f"{bear_df['Staking Supply'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Total Locked", f"{bear_df['Total Locked Supply'].max() / 1e6:.1f}M BRB")
             
             # Calculate average reward per subnet for bearish scenario
             avg_reward_bear = []
-            for i, epoch in enumerate(fee_results_bear['epoch']):
-                active_subnets = fee_results_bear['active_subnets'].iloc[i]
-                monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+            for i, month in enumerate(bear_df['Month']):
+                active_subnets = bear_df['Active Subnets'].iloc[i]
+                monthly_emission = bear_df['Emissions'].iloc[i]
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_bear.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bear):.1f} BRB")
         
         with col2:
             st.write("**Neutral Scenario**")
-            st.metric("Total Fees", f"{fee_results_neutral['total_fees'].sum():.0f} BRB")
-            st.metric("Avg Monthly Fees", f"{fee_results_neutral['total_fees'].mean():.1f} BRB")
-            st.metric("Peak ENTs", f"{fee_results_neutral['active_ENTs'].max():.0f}")
-            st.metric("Peak Subnets", f"{fee_results_neutral['active_subnets'].max():.0f}")
+            st.metric("Total Fees", f"{neutral_df['Total Fees'].sum():.0f} BRB")
+            st.metric("Avg Monthly Fees", f"{neutral_df['Total Fees'].mean():.1f} BRB")
+            st.metric("Peak ENTs", f"{neutral_df['Active ENTs'].max():.0f}")
+            st.metric("Peak Subnets", f"{neutral_df['Active Subnets'].max():.0f}")
+            st.metric("Peak Locked Collateral", f"{neutral_df['Locked Collateral'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Staking Supply", f"{neutral_df['Staking Supply'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Total Locked", f"{neutral_df['Total Locked Supply'].max() / 1e6:.1f}M BRB")
             
             # Calculate average reward per subnet for neutral scenario
             avg_reward_neutral = []
-            for i, epoch in enumerate(fee_results_neutral['epoch']):
-                active_subnets = fee_results_neutral['active_subnets'].iloc[i]
-                monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+            for i, month in enumerate(neutral_df['Month']):
+                active_subnets = neutral_df['Active Subnets'].iloc[i]
+                monthly_emission = neutral_df['Emissions'].iloc[i]
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_neutral.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_neutral):.1f} BRB")
         
         with col3:
             st.write("**Bullish Scenario**")
-            st.metric("Total Fees", f"{fee_results_bull['total_fees'].sum():.0f} BRB")
-            st.metric("Avg Monthly Fees", f"{fee_results_bull['total_fees'].mean():.1f} BRB")
-            st.metric("Peak ENTs", f"{fee_results_bull['active_ENTs'].max():.0f}")
-            st.metric("Peak Subnets", f"{fee_results_bull['active_subnets'].max():.0f}")
+            st.metric("Total Fees", f"{bull_df['Total Fees'].sum():.0f} BRB")
+            st.metric("Avg Monthly Fees", f"{bull_df['Total Fees'].mean():.1f} BRB")
+            st.metric("Peak ENTs", f"{bull_df['Active ENTs'].max():.0f}")
+            st.metric("Peak Subnets", f"{bull_df['Active Subnets'].max():.0f}")
+            st.metric("Peak Locked Collateral", f"{bull_df['Locked Collateral'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Staking Supply", f"{bull_df['Staking Supply'].max() / 1e6:.1f}M BRB")
+            st.metric("Peak Total Locked", f"{bull_df['Total Locked Supply'].max() / 1e6:.1f}M BRB")
             
             # Calculate average reward per subnet for bullish scenario
             avg_reward_bull = []
-            for i, epoch in enumerate(fee_results_bull['epoch']):
-                active_subnets = fee_results_bull['active_subnets'].iloc[i]
-                monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+            for i, month in enumerate(bull_df['Month']):
+                active_subnets = bull_df['Active Subnets'].iloc[i]
+                monthly_emission = bull_df['Emissions'].iloc[i]
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_bull.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bull):.1f} BRB")
@@ -1212,37 +1528,48 @@ with tab2:
         # Add yearly breakdown of earnings per subnet
         st.subheader("Earnings per Subnet by Year")
         
-        def calculate_yearly_earnings(fee_results, emission_schedule):
-            """Calculate both average monthly and total annual BRB per subnet for each year"""
+        def calculate_yearly_earnings(results_df):
+            """Calculate both average monthly and total annual BRB per subnet for each year (net after fees)"""
             yearly_metrics = {}
             
             for year in range(1, 5):  # Years 1-4
                 start_month = (year - 1) * 12 + 1
                 end_month = year * 12
                 
-                # For average monthly calculation (current approach)
-                year_rewards = []
-                # For total annual calculation (new approach)
-                total_yearly_rewards = 0
-                subnet_counts = []
+                # Filter data for this year
+                year_data = results_df[(results_df['Month'] >= start_month) & (results_df['Month'] <= end_month)]
                 
-                for i, epoch in enumerate(fee_results['epoch']):
-                    if start_month <= epoch <= end_month:
-                        active_subnets = fee_results['active_subnets'].iloc[i]
-                        monthly_emission = emission_schedule[i] if i < len(emission_schedule) else 0
+                if len(year_data) > 0:
+                    # Calculate average monthly net reward per subnet (after fees)
+                    year_net_rewards = []
+                    for _, row in year_data.iterrows():
+                        active_subnets = row['Active Subnets']
+                        monthly_emission = row['Emissions']
+                        subnet_reg_fees = row['Subnet Registration Fees']
+                        subnet_maint_fees = row['Subnet Maintenance Fees']
                         
-                        # Average monthly calculation
-                        avg_reward = monthly_emission / max(active_subnets, 1)
-                        year_rewards.append(avg_reward)
+                        # Gross reward per subnet
+                        gross_reward_per_subnet = monthly_emission / max(active_subnets, 1)
                         
-                        # Total annual calculation
-                        total_yearly_rewards += monthly_emission
-                        subnet_counts.append(active_subnets)
-                
-                if year_rewards:
-                    avg_monthly = np.mean(year_rewards)
-                    avg_subnets_that_year = np.mean(subnet_counts)
-                    total_annual = total_yearly_rewards / max(avg_subnets_that_year, 1)
+                        # Net reward per subnet (gross - maintenance fees per subnet - registration fees amortized)
+                        # Registration fees are one-time, so we amortize them over the subnet lifetime
+                        # For simplicity, we'll assume they're amortized over 12 months
+                        amortized_reg_fee = subnet_reg_fees / max(active_subnets, 1) / 12
+                        maint_fee_per_subnet = subnet_maint_fees / max(active_subnets, 1)
+                        
+                        net_reward = gross_reward_per_subnet - maint_fee_per_subnet - amortized_reg_fee
+                        year_net_rewards.append(max(0, net_reward))  # Ensure non-negative
+                    
+                    avg_monthly = np.mean(year_net_rewards)
+                    
+                    # Calculate total annual net rewards
+                    total_yearly_gross = year_data['Emissions'].sum()
+                    total_yearly_reg_fees = year_data['Subnet Registration Fees'].sum()
+                    total_yearly_maint_fees = year_data['Subnet Maintenance Fees'].sum()
+                    avg_subnets_that_year = year_data['Active Subnets'].mean()
+                    
+                    total_annual = (total_yearly_gross - total_yearly_reg_fees - total_yearly_maint_fees) / max(avg_subnets_that_year, 1)
+                    total_annual = max(0, total_annual)  # Ensure non-negative
                     
                     yearly_metrics[f'Year {year}'] = {
                         'avg_monthly': avg_monthly,
@@ -1257,71 +1584,96 @@ with tab2:
             return yearly_metrics
         
         # Calculate yearly earnings for each scenario
-        bear_yearly = calculate_yearly_earnings(fee_results_bear, emission_schedule)
-        neutral_yearly = calculate_yearly_earnings(fee_results_neutral, emission_schedule)
-        bull_yearly = calculate_yearly_earnings(fee_results_bull, emission_schedule)
+        bear_yearly = calculate_yearly_earnings(bear_df)
+        neutral_yearly = calculate_yearly_earnings(neutral_df)
+        bull_yearly = calculate_yearly_earnings(bull_df)
         
         # Display yearly breakdown in columns with both BRB and USD values
         col1, col2, col3 = st.columns(3)
         
-        def display_earnings_metrics(yearly_data, token_price):
-            """Display both average monthly and total annual earnings metrics"""
-            st.markdown("##### Average Monthly Earnings per Subnet")
+        def display_earnings_metrics(yearly_data, token_price, collateral_amount):
+            """Display both average monthly and total annual earnings metrics with ROI"""
+            st.markdown("##### Average Monthly Net Earnings per Subnet (After Fees) ℹ️")
+            st.info("""
+            **Monthly Net Earnings = Gross Emissions Reward - Maintenance Fees - Amortized Registration Fees**
             
-            # Create two columns for the headers
-            brb_col, usd_col = st.columns(2)
+            - **Gross Reward**: Monthly emissions ÷ active subnets
+            - **Maintenance Fees**: Monthly maintenance fees ÷ active subnets  
+            - **Registration Fees**: Registration fees ÷ active subnets ÷ 12 (amortized over 1 year)
+            """)
+            
+            # Create three columns for the headers
+            brb_col, usd_col, roi_col = st.columns(3)
             with brb_col:
                 st.markdown("**BRB**")
             with usd_col:
                 st.markdown("**USD**")
+            with roi_col:
+                st.markdown("**ROI**")
             
             # Display each year's average monthly data
             for year, metrics in yearly_data.items():
                 avg_monthly = metrics['avg_monthly']
                 usd_value = avg_monthly * token_price
+                roi_monthly = (avg_monthly / collateral_amount) * 100 if collateral_amount > 0 else 0
                 
                 # Create columns for this year's values
-                year_brb_col, year_usd_col = st.columns(2)
+                year_brb_col, year_usd_col, year_roi_col = st.columns(3)
                 
                 with year_brb_col:
                     st.markdown(f"**{year}:** {avg_monthly:,.0f}")
                 with year_usd_col:
                     st.markdown(f"${usd_value:,.2f}")
+                with year_roi_col:
+                    st.markdown(f"{roi_monthly:.2f}%")
             
             st.markdown("---")
-            st.markdown("##### Total Annual Earnings per Subnet")
+            st.markdown("##### Total Annual Net Earnings per Subnet (After Fees) ℹ️")
+            st.info("""
+            **Annual Net Earnings = Total Annual Gross - Total Annual Registration Fees - Total Annual Maintenance Fees**
             
-            # Create two columns for the headers
-            brb_col, usd_col = st.columns(2)
+            - **Total Gross**: Sum of all monthly emissions for the year
+            - **Total Registration Fees**: Sum of all registration fees for the year
+            - **Total Maintenance Fees**: Sum of all maintenance fees for the year
+            - **Per Subnet**: Total net ÷ average active subnets for the year
+            """)
+            
+            # Create three columns for the headers
+            brb_col, usd_col, roi_col = st.columns(3)
             with brb_col:
                 st.markdown("**BRB**")
             with usd_col:
                 st.markdown("**USD**")
+            with roi_col:
+                st.markdown("**ROI**")
             
             # Display each year's total annual data
             for year, metrics in yearly_data.items():
                 total_annual = metrics['total_annual']
                 usd_value = total_annual * token_price
+                roi_annual = (total_annual / collateral_amount) * 100 if collateral_amount > 0 else 0
                 
                 # Create columns for this year's values
-                year_brb_col, year_usd_col = st.columns(2)
+                year_brb_col, year_usd_col, year_roi_col = st.columns(3)
                 
                 with year_brb_col:
                     st.markdown(f"**{year}:** {total_annual:,.0f}")
                 with year_usd_col:
                     st.markdown(f"${usd_value:,.2f}")
+                with year_roi_col:
+                    st.markdown(f"{roi_annual:.2f}%")
         
         with col1:
             st.markdown("### Bearish Scenario")
             st.markdown("---")
-            display_earnings_metrics(bear_yearly, token_price)
+            display_earnings_metrics(bear_yearly, token_price, st.session_state.subnet_collateral_amount)
         
         with col2:
             st.markdown("### Neutral Scenario")
             st.markdown("---")
-            display_earnings_metrics(neutral_yearly, token_price)
+            display_earnings_metrics(neutral_yearly, token_price, st.session_state.subnet_collateral_amount)
         
         with col3:
             st.markdown("### Bullish Scenario")
             st.markdown("---")
-            display_earnings_metrics(bull_yearly, token_price) 
+            display_earnings_metrics(bull_yearly, token_price, st.session_state.subnet_collateral_amount) 
