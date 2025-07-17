@@ -145,6 +145,13 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
         exponential_start_emission = 12_000_000
         exponential_end_emission = 2_000_000
 
+simulation_months = st.number_input(
+    "Simulation Months",
+    value=120,
+    min_value=12,
+    max_value=240
+)
+
 # Create tabs
 tab1, tab2 = st.tabs(["Emissions Schedule", "Fee Simulation"])
 
@@ -227,27 +234,10 @@ with tab1:
             step=0.1
         )
         
-        burn_coefficient = st.number_input(
-            "Burn Coefficient", 
-            value=1_000_000, 
-            min_value=100_000, 
-            max_value=10_000_000,
-            step=100_000
-        )
-        
-        burn_pattern = st.selectbox(
-            "Burn Pattern",
-            ["logarithmic", "exponential", "sigmoid"],
-            index=0
-        )
-        
-        simulation_months = st.number_input(
-            "Simulation Months", 
-            value=120, 
-            min_value=12, 
-            max_value=240
-        )
-    
+        # Remove Streamlit widgets for burn_coefficient and burn_pattern
+        # (Lines 229 and 237)
+        # Remove their inclusion in parameter dictionaries (lines 432-433 and similar for other params)
+
     # Fee Simulation Configuration Expander (placeholder for now)
     with st.sidebar.expander("Fee Simulation Configuration", expanded=True):
         st.info("Configure fee simulation parameters for different market scenarios.")
@@ -272,10 +262,10 @@ with tab1:
         
         subnet_maintenance_fee_pct = st.slider(
             "Subnet Maintenance Fee (%)", 
-            value=5.0,
-            min_value=0.1,
-            max_value=20.0,
-            step=0.1,
+            value=25.0,
+            min_value=1.0,
+            max_value=40.0,
+            step=1.0,
             help="Percentage of subnet rewards charged as maintenance fee",
             key="subnet_maintenance_fee_pct"
         )
@@ -291,13 +281,23 @@ with tab1:
         )
         
         staking_percentage = st.slider(
-            "Staking Percentage (% of Total Supply)", 
+            "Staking Percentage (% of Circulating Supply)", 
             value=10.0,
             min_value=0.0,
             max_value=50.0,
             step=0.5,
-            help="Percentage of total supply that users choose to stake",
+            help="Percentage of circulating supply that users choose to stake",
             key="staking_percentage"
+        )
+        
+        staking_rewards_allocation = st.slider(
+            "Staking Rewards Allocation (% of Total Emissions)", 
+            value=5.0,
+            min_value=1.0,
+            max_value=20.0,
+            step=0.5,
+            help="Percentage of total emissions allocated to stakers (remainder goes to subnets)",
+            key="staking_rewards_allocation"
         )
         
         st.subheader("Scenario Parameters")
@@ -321,6 +321,37 @@ with tab1:
                 max_value=500,
                 help="Initial number of subnets (same for all scenarios)",
                 key="starting_subnets"
+            )
+        
+        # Staking participants for each scenario
+        st.subheader("Staking Participants")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            staking_participants_bear = st.number_input(
+                "Staking Participants (Bear)", 
+                value=1000, 
+                min_value=1, 
+                max_value=100000,
+                help="Number of staking participants in bearish scenario",
+                key="staking_participants_bear"
+            )
+        with col2:
+            staking_participants_neutral = st.number_input(
+                "Staking Participants (Neutral)", 
+                value=2000, 
+                min_value=1, 
+                max_value=100000,
+                help="Number of staking participants in neutral scenario",
+                key="staking_participants_neutral"
+            )
+        with col3:
+            staking_participants_bull = st.number_input(
+                "Staking Participants (Bull)", 
+                value=5000, 
+                min_value=1, 
+                max_value=100000,
+                help="Number of staking participants in bullish scenario",
+                key="staking_participants_bull"
             )
         
         # Lifetime parameters
@@ -430,8 +461,6 @@ with tab1:
                 'foundation_vesting_months': foundation_vesting_months,
                 't_burn': t_burn,
                 'burn_emission_factor': burn_emission_factor,
-                'burn_coefficient': burn_coefficient,
-                'burn_pattern': burn_pattern,
                 'simulation_months': simulation_months,
                 'emissions_schedule_type': emissions_schedule_type,
                 'linear_start_emission': linear_start_emission,
@@ -451,7 +480,8 @@ with tab1:
                 'F_base_subnet': st.session_state.F_base_subnet,
                 'subnet_maintenance_fee_pct': st.session_state.subnet_maintenance_fee_pct / 100.0,
                 'subnet_collateral_amount': st.session_state.subnet_collateral_amount,
-                'staking_percentage': st.session_state.staking_percentage / 100.0
+                'staking_percentage': st.session_state.staking_percentage / 100.0,
+                'staking_rewards_allocation': st.session_state.staking_rewards_allocation / 100.0
             }
             
             # Bear scenario (lower growth)
@@ -459,6 +489,7 @@ with tab1:
             bear_params.update({
                 'lambda_ent': st.session_state.lambda_ent_bear,
                 'lambda_subnet': st.session_state.lambda_subnet_bear,
+                'staking_participants': st.session_state.staking_participants_bear,
                 'random_seed': 42
             })
             models['bear'] = BitRobotSupplyModel(**bear_params)
@@ -470,6 +501,7 @@ with tab1:
             neutral_params.update({
                 'lambda_ent': st.session_state.lambda_ent_neutral,
                 'lambda_subnet': st.session_state.lambda_subnet_neutral,
+                'staking_participants': st.session_state.staking_participants_neutral,
                 'random_seed': 43
             })
             models['neutral'] = BitRobotSupplyModel(**neutral_params)
@@ -481,6 +513,7 @@ with tab1:
             bull_params.update({
                 'lambda_ent': st.session_state.lambda_ent_bull,
                 'lambda_subnet': st.session_state.lambda_subnet_bull,
+                'staking_participants': st.session_state.staking_participants_bull,
                 'random_seed': 44
             })
             models['bull'] = BitRobotSupplyModel(**bull_params)
@@ -499,7 +532,8 @@ with tab1:
         results_df = st.session_state.results_df
         
         # Calculate components for the breakdown plot
-        community_portion = results_df['Cumulative Emissions']
+        # Combine staking and subnet rewards as community
+        community_portion = results_df['Staking Rewards'].cumsum() + results_df['Subnet Rewards'].cumsum()
         team_portion = results_df['Team Vested']
         investor_portion = results_df['Investor Vested']
         foundation_portion = results_df['Foundation Vested']
@@ -560,9 +594,14 @@ with tab1:
         
         breakdown_chart = alt.layer(breakdown_chart, rule)
         
-        # Plot 2: Net Flow - properly structured
+        # Plot 2: Net Flow - properly structured with all components
         net_flow_data = []
         for i, month in enumerate(results_df['Month']):
+            net_flow_data.append({
+                'Month': month,
+                'Type': 'Emissions',
+                'Amount': results_df['Emissions'].iloc[i] / 1e6
+            })
             net_flow_data.append({
                 'Month': month,
                 'Type': 'Burn',
@@ -570,8 +609,8 @@ with tab1:
             })
             net_flow_data.append({
                 'Month': month,
-                'Type': 'Emissions',
-                'Amount': results_df['Emissions'].iloc[i] / 1e6
+                'Type': 'Net Flow',
+                'Amount': (results_df['Emissions'].iloc[i] - results_df['Burn'].iloc[i]) / 1e6
             })
         net_flow_data = pd.DataFrame(net_flow_data)
         
@@ -579,11 +618,16 @@ with tab1:
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Amount:Q', title='BRB (Millions)'),
             color=alt.Color('Type:N', scale=alt.Scale(
-                domain=['Burn', 'Emissions'],
-                range=['#d62728', '#2ca02c']
-            ))
+                domain=['Emissions', 'Burn', 'Net Flow'],
+                range=['#2ca02c', '#d62728', '#9467bd']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Net Flow',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
         ).properties(
-            title='Net Flow',
+            title='Supply Flow Components (Neutral Scenario)',
             width=400,
             height=350
         ).add_params(
@@ -599,7 +643,7 @@ with tab1:
             cumulative_data.append({
                 'Month': month,
                 'Component': 'Community',
-                'Amount': results_df['Cumulative Fixed Emissions'].iloc[i] / 1e9
+                'Amount': (results_df['Staking Rewards'].cumsum().iloc[i] + results_df['Subnet Rewards'].cumsum().iloc[i]) / 1e9
             })
             cumulative_data.append({
                 'Month': month,
@@ -647,8 +691,8 @@ with tab1:
         
         print(month_data)
         # Calculate the cumulative supply for each component
-        # For community, we use the cumulative fixed emissions (community allocation)
-        community_supply = month_data['Cumulative Fixed Emissions']
+        # Combine staking and subnet rewards as community
+        community_supply = results_df['Staking Rewards'].cumsum().iloc[48] + results_df['Subnet Rewards'].cumsum().iloc[48]
         team_supply = month_data['Team Vested']
         investor_supply = month_data['Investor Vested']
         foundation_team_supply = month_data['Foundation Vested']
@@ -701,9 +745,9 @@ with tab1:
         # Get month 48 data
         month_48_data = results_df[results_df['Month'] == 48].iloc[0]
         
-        # Calculate total allocated supply (team + investor + foundation + community emissions)
+        # Calculate total allocated supply (team + investor + foundation + staking + subnet emissions)
         total_allocated = (team_allocation + investor_allocation + foundation_allocation + 
-                          month_48_data['Cumulative Fixed Emissions'])
+                          results_df['Staking Rewards'].cumsum().iloc[48] + results_df['Subnet Rewards'].cumsum().iloc[48])
         
         with col1:
             st.metric(
@@ -725,7 +769,7 @@ with tab1:
         
         with col4:
             st.metric(
-                "Total Burn by Month 48",
+                "Total Burn by Month 48 (Neutral)",
                 f"{results_df['Burn'].cumsum().iloc[48] / 1e6:.1f}M BRB"
             )
         
@@ -757,8 +801,8 @@ with tab1:
         with col4:
             st.metric(
                 "Community Emissions",
-                f"{month_48_data['Cumulative Fixed Emissions'] / 1e6:.0f}M BRB",
-                f"{(month_48_data['Cumulative Fixed Emissions'] / total_allocated * 100):.1f}%"
+                f"{community_supply / 1e6:.0f}M BRB",
+                f"{(community_supply / total_allocated * 100):.1f}%"
             )
     
     else:
@@ -1464,6 +1508,144 @@ with tab2:
         with col10:
             st.altair_chart(total_locked_pct_chart, use_container_width=True)
 
+        # Plot 8: Per-Participant Staking Rewards Over Time (All Scenarios)
+        per_participant_rewards_data = []
+        
+        # Bearish scenario
+        for i, month in enumerate(bear_df['Month']):
+            per_participant_rewards_data.append({
+                'Month': month,
+                'Scenario': 'Bearish',
+                'Rewards per Participant': bear_df['Per Staker Rewards'].iloc[i]
+            })
+        
+        # Neutral scenario
+        for i, month in enumerate(neutral_df['Month']):
+            per_participant_rewards_data.append({
+                'Month': month,
+                'Scenario': 'Neutral',
+                'Rewards per Participant': neutral_df['Per Staker Rewards'].iloc[i]
+            })
+        
+        # Bullish scenario
+        for i, month in enumerate(bull_df['Month']):
+            per_participant_rewards_data.append({
+                'Month': month,
+                'Scenario': 'Bullish',
+                'Rewards per Participant': bull_df['Per Staker Rewards'].iloc[i]
+            })
+        
+        per_participant_rewards_data = pd.DataFrame(per_participant_rewards_data)
+        
+        # Filter to start from month 1
+        per_participant_rewards_data = per_participant_rewards_data[per_participant_rewards_data['Month'] >= 1]
+        
+        per_participant_rewards_chart = alt.Chart(per_participant_rewards_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Rewards per Participant:Q', title='Rewards per Participant (BRB)'),
+            color=alt.Color('Scenario:N', scale=alt.Scale(
+                domain=['Bearish', 'Neutral', 'Bullish'],
+                range=['#d62728', '#2ca02c', '#1f77b4']
+            ))
+        ).properties(
+            title='Per-Participant Staking Rewards Over Time',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+
+        # Add vertical line at month 48
+        vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
+            strokeDash=[5, 5],
+            color='gray',
+            strokeWidth=2
+        ).encode(x='x:Q')
+
+        per_participant_rewards_chart = alt.layer(per_participant_rewards_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        # Add the per-participant rewards chart in a new row
+        col11, col12 = st.columns(2)
+        
+        with col11:
+            st.altair_chart(per_participant_rewards_chart, use_container_width=True)
+        
+        # Add info about the staking plots
+        st.info("""
+        **Staking Analysis:**
+        - **Per-Participant Rewards**: Shows actual BRB rewards each staker receives (varies by scenario due to different participant counts)
+        - **APY per Token**: Shows the return rate per token staked (similar across scenarios since we assume equal staking amounts per participant)
+        """)
+        
+        # Plot 9: Staking APY Over Time (All Scenarios) - for reference
+        staking_apy_data = []
+        
+        # Bearish scenario
+        for i, month in enumerate(bear_df['Month']):
+            staking_apy_data.append({
+                'Month': month,
+                'Scenario': 'Bearish',
+                'APY': bear_df['Staking APY'].iloc[i]
+            })
+        
+        # Neutral scenario
+        for i, month in enumerate(neutral_df['Month']):
+            staking_apy_data.append({
+                'Month': month,
+                'Scenario': 'Neutral',
+                'APY': neutral_df['Staking APY'].iloc[i]
+            })
+        
+        # Bullish scenario
+        for i, month in enumerate(bull_df['Month']):
+            staking_apy_data.append({
+                'Month': month,
+                'Scenario': 'Bullish',
+                'APY': bull_df['Staking APY'].iloc[i]
+            })
+        
+        staking_apy_data = pd.DataFrame(staking_apy_data)
+        
+        # Filter to start from month 1
+        staking_apy_data = staking_apy_data[staking_apy_data['Month'] >= 1]
+        
+        staking_apy_chart = alt.Chart(staking_apy_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('APY:Q', title='APY (%)'),
+            color=alt.Color('Scenario:N', scale=alt.Scale(
+                domain=['Bearish', 'Neutral', 'Bullish'],
+                range=['#d62728', '#2ca02c', '#1f77b4']
+            ))
+        ).properties(
+            title='Staking APY per Token Over Time',
+            width=450,
+            height=300
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+
+        # Add vertical line at month 48
+        vertical_line = alt.Chart(pd.DataFrame({'x': [48]})).mark_rule(
+            strokeDash=[5, 5],
+            color='gray',
+            strokeWidth=2
+        ).encode(x='x:Q')
+
+        staking_apy_chart = alt.layer(staking_apy_chart, vertical_line).configure_view(
+            strokeWidth=0
+        ).configure_axisLeft(
+            labelPadding=10,
+            titlePadding=10
+        )
+        
+        with col12:
+            st.altair_chart(staking_apy_chart, use_container_width=True)
+
         # Display summary statistics for all scenarios
         st.subheader("Fee Simulation Summary by Scenario")
         col1, col2, col3 = st.columns(3)
@@ -1482,10 +1664,14 @@ with tab2:
             avg_reward_bear = []
             for i, month in enumerate(bear_df['Month']):
                 active_subnets = bear_df['Active Subnets'].iloc[i]
-                monthly_emission = bear_df['Emissions'].iloc[i]
+                monthly_emission = bear_df['Subnet Rewards'].iloc[i]  # Use subnet rewards, not total emissions
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_bear.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bear):.1f} BRB")
+            
+            # Calculate average staking APY for bearish scenario
+            avg_apy_bear = bear_df['Staking APY'].mean()
+            st.metric("Avg Staking APY", f"{avg_apy_bear:.2f}%")
         
         with col2:
             st.write("**Neutral Scenario**")
@@ -1501,10 +1687,14 @@ with tab2:
             avg_reward_neutral = []
             for i, month in enumerate(neutral_df['Month']):
                 active_subnets = neutral_df['Active Subnets'].iloc[i]
-                monthly_emission = neutral_df['Emissions'].iloc[i]
+                monthly_emission = neutral_df['Subnet Rewards'].iloc[i]  # Use subnet rewards, not total emissions
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_neutral.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_neutral):.1f} BRB")
+            
+            # Calculate average staking APY for neutral scenario
+            avg_apy_neutral = neutral_df['Staking APY'].mean()
+            st.metric("Avg Staking APY", f"{avg_apy_neutral:.2f}%")
         
         with col3:
             st.write("**Bullish Scenario**")
@@ -1520,10 +1710,14 @@ with tab2:
             avg_reward_bull = []
             for i, month in enumerate(bull_df['Month']):
                 active_subnets = bull_df['Active Subnets'].iloc[i]
-                monthly_emission = bull_df['Emissions'].iloc[i]
+                monthly_emission = bull_df['Subnet Rewards'].iloc[i]  # Use subnet rewards, not total emissions
                 avg_reward = monthly_emission / max(active_subnets, 1)
                 avg_reward_bull.append(avg_reward)
             st.metric("Avg Reward per Subnet", f"{np.mean(avg_reward_bull):.1f} BRB")
+            
+            # Calculate average staking APY for bullish scenario
+            avg_apy_bull = bull_df['Staking APY'].mean()
+            st.metric("Avg Staking APY", f"{avg_apy_bull:.2f}%")
         
         # Add yearly breakdown of earnings per subnet
         st.subheader("Earnings per Subnet by Year")
@@ -1544,7 +1738,7 @@ with tab2:
                     year_net_rewards = []
                     for _, row in year_data.iterrows():
                         active_subnets = row['Active Subnets']
-                        monthly_emission = row['Emissions']
+                        monthly_emission = row['Subnet Rewards']  # Use subnet rewards, not total emissions
                         subnet_reg_fees = row['Subnet Registration Fees']
                         subnet_maint_fees = row['Subnet Maintenance Fees']
                         
@@ -1563,7 +1757,7 @@ with tab2:
                     avg_monthly = np.mean(year_net_rewards)
                     
                     # Calculate total annual net rewards
-                    total_yearly_gross = year_data['Emissions'].sum()
+                    total_yearly_gross = year_data['Subnet Rewards'].sum()  # Use subnet rewards, not total emissions
                     total_yearly_reg_fees = year_data['Subnet Registration Fees'].sum()
                     total_yearly_maint_fees = year_data['Subnet Maintenance Fees'].sum()
                     avg_subnets_that_year = year_data['Active Subnets'].mean()
@@ -1595,9 +1789,9 @@ with tab2:
             """Display both average monthly and total annual earnings metrics with ROI"""
             st.markdown("##### Average Monthly Net Earnings per Subnet (After Fees) ℹ️")
             st.info("""
-            **Monthly Net Earnings = Gross Emissions Reward - Maintenance Fees - Amortized Registration Fees**
+            **Monthly Net Earnings = Gross Subnet Reward - Maintenance Fees - Amortized Registration Fees**
             
-            - **Gross Reward**: Monthly emissions ÷ active subnets
+            - **Gross Reward**: Monthly subnet rewards ÷ active subnets
             - **Maintenance Fees**: Monthly maintenance fees ÷ active subnets  
             - **Registration Fees**: Registration fees ÷ active subnets ÷ 12 (amortized over 1 year)
             """)
@@ -1632,7 +1826,7 @@ with tab2:
             st.info("""
             **Annual Net Earnings = Total Annual Gross - Total Annual Registration Fees - Total Annual Maintenance Fees**
             
-            - **Total Gross**: Sum of all monthly emissions for the year
+            - **Total Gross**: Sum of all monthly subnet rewards for the year
             - **Total Registration Fees**: Sum of all registration fees for the year
             - **Total Maintenance Fees**: Sum of all maintenance fees for the year
             - **Per Subnet**: Total net ÷ average active subnets for the year

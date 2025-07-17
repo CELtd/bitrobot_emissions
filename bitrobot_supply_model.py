@@ -3,7 +3,6 @@ import pandas as pd
 
 class BitRobotSupplyModel:
     def __init__(self,
-                 initial_supply=0,
                  team_allocation=269_000_000,  
                  investor_allocation=351_000_000, 
                  foundation_allocation=307_000_000,
@@ -14,10 +13,7 @@ class BitRobotSupplyModel:
                  foundation_vesting_months=48,
                  t_burn=48,
                  burn_emission_factor=0.9,
-                 burn_coefficient=1000000,
                  burn_lookback_months=12,
-                 burn_volatility=0.2,
-                 burn_pattern="logarithmic",
                  simulation_months=120,
                  emissions_schedule_type="static",
                  linear_start_emission=12_000_000,
@@ -44,6 +40,8 @@ class BitRobotSupplyModel:
                  subnet_collateral_amount=100_000,
                  # Staking parameters
                  staking_percentage=0.0,
+                 staking_rewards_allocation=0.05,  # New parameter: percentage of emissions for stakers
+                 staking_participants=1000,  # New parameter: number of staking participants
                  alpha=0.5,
                  eta=0.5,
                  gamma=1.0,
@@ -54,21 +52,17 @@ class BitRobotSupplyModel:
         Initialize the BitRobot supply model V2.
         
         Parameters:
-        - initial_supply: Initial token supply (default: 1 billion)
-        - team_allocation: Tokens allocated to team (default: 260M)
-        - investor_allocation: Tokens allocated to investors (default: 260M)
-        - foundation_allocation: Tokens allocated to foundation (default: 480M)
+        - team_allocation: Tokens allocated to team (default: 269M)
+        - investor_allocation: Tokens allocated to investors (default: 351M)
+        - foundation_allocation: Tokens allocated to foundation (default: 307M)
         - foundation_initial_liquidity: Initial foundation liquidity release (default: 50M)
-        - foundation_target_48m: Target foundation tokens released by month 48 (default: 476M)
+        - foundation_target_48m: Target foundation tokens released by month 48 (default: 307M)
         - team_cliff_months: Number of months for team cliff (default: 12)
         - team_vesting_months: Number of months for team vesting after cliff (default: 24)
         - foundation_vesting_months: Number of months for foundation vesting (default: 48)
         - t_burn: Month at which burn-based emissions start (default: 48)
         - burn_emission_factor: Factor to multiply burn sum by for emissions (default: 0.9)
-        - burn_coefficient: Coefficient b in the burn function (default: 1,000,000)
         - burn_lookback_months: Number of months to look back for burn sum (default: 12)
-        - burn_volatility: Standard deviation of random burn variation (default: 0.2)
-        - burn_pattern: Type of burn pattern ("logarithmic", "exponential", "sigmoid") (default: "logarithmic")
         - simulation_months: Total number of months to simulate (default: 120)
         - emissions_schedule_type: Type of emissions schedule ("static", "linear", "exponential") (default: "static")
         - linear_start_emission: Starting monthly emission for linear schedule (default: 12M)
@@ -91,15 +85,19 @@ class BitRobotSupplyModel:
         - F_base_subnet: Static fee for subnet registration (default: 20.0)
         - subnet_maintenance_fee_pct: Percentage of rewards charged as maintenance fee (default: 0.05)
         - subnet_collateral_amount: Amount of tokens required as collateral per subnet (default: 100,000)
+        - staking_percentage: Percentage of circulating supply that is staked (default: 0.0)
+        - staking_rewards_allocation: Percentage of total emissions allocated to stakers (default: 0.05)
+        - staking_participants: Number of staking participants (default: 1000)
         - alpha, eta, gamma, delta, kappa: Fee model parameters (defaults: 0.5, 0.5, 1.0, 1.0, 0.05)
         - random_seed: Random seed for reproducibility (default: 42)
+        
+        Note: Burn is now calculated as total fees collected, not using stochastic simulation.
         """
         # Validate allocations
         # if team_allocation + dao_allocation != initial_supply:
         #     raise ValueError("Team and DAO allocations must sum to initial supply")
         
         # Store parameters
-        self.initial_supply = initial_supply
         self.team_allocation = team_allocation
         self.investor_allocation = investor_allocation
         self.foundation_allocation = foundation_allocation
@@ -110,10 +108,7 @@ class BitRobotSupplyModel:
         self.foundation_vesting_months = foundation_vesting_months
         self.t_burn = t_burn
         self.burn_emission_factor = burn_emission_factor
-        self.burn_coefficient = burn_coefficient
         self.burn_lookback_months = burn_lookback_months
-        self.burn_volatility = burn_volatility
-        self.burn_pattern = burn_pattern
         self.simulation_months = simulation_months
         self.emissions_schedule_type = emissions_schedule_type
         self.linear_start_emission = linear_start_emission
@@ -139,6 +134,8 @@ class BitRobotSupplyModel:
         self.subnet_maintenance_fee_pct = subnet_maintenance_fee_pct
         self.subnet_collateral_amount = subnet_collateral_amount
         self.staking_percentage = staking_percentage
+        self.staking_rewards_allocation = staking_rewards_allocation
+        self.staking_participants = staking_participants
         self.alpha = alpha
         self.eta = eta
         self.gamma = gamma
@@ -169,7 +166,6 @@ class BitRobotSupplyModel:
         
         # Supply tracking arrays
         self.circulating_supply = np.zeros(simulation_months + 1)
-        self.total_supply = np.zeros(simulation_months + 1)
         
         # Component tracking arrays
         self.team_contribution = np.zeros(simulation_months + 1)
@@ -196,6 +192,12 @@ class BitRobotSupplyModel:
         # Staking tracking arrays
         self.staking_supply = np.zeros(simulation_months + 1)
         self.total_locked_supply = np.zeros(simulation_months + 1)
+        
+        # Staking rewards tracking arrays
+        self.staking_rewards = np.zeros(simulation_months + 1)
+        self.subnet_rewards = np.zeros(simulation_months + 1)
+        self.per_staker_rewards = np.zeros(simulation_months + 1)
+        self.staking_apy = np.zeros(simulation_months + 1)
         
         # Define fixed emissions schedule
         self.fixed_emissions = np.zeros(simulation_months + 1)
@@ -282,17 +284,6 @@ class BitRobotSupplyModel:
                 emission = self.exponential_start_emission * np.exp(-decay_rate * (month - 1))
                 self.fixed_emissions[month] = emission
             
-    def _calculate_base_burn(self, t):
-        """Calculate the base burn value for a given month based on the selected pattern."""
-        if self.burn_pattern == "logarithmic":
-            return self.burn_coefficient * np.log(1 + t)
-        elif self.burn_pattern == "exponential":
-            return self.burn_coefficient * (1 - np.exp(-t/12))
-        elif self.burn_pattern == "sigmoid":
-            return self.burn_coefficient / (1 + np.exp(-(t - self.simulation_months/2)/10))
-        else:
-            raise ValueError(f"Unknown burn pattern: {self.burn_pattern}")
-            
     def calculate_team_vesting(self):
         """Calculate the monthly team vesting schedule."""
         # No vesting during cliff period
@@ -322,15 +313,6 @@ class BitRobotSupplyModel:
         monthly_vesting = remaining_to_48m / self.foundation_vesting_months
         self.foundation_vesting[1:self.foundation_vesting_months + 1] = monthly_vesting
         
-    def calculate_burn(self):
-        """Calculate the monthly burn based on the selected pattern with random variation."""
-        np.random.seed(42)  # Set seed for reproducibility
-        for t in range(1, self.simulation_months + 1):
-            base_burn = self._calculate_base_burn(t)
-            std_dev = self.burn_volatility * base_burn
-            random_burn = np.random.normal(base_burn, std_dev)
-            self.burn[t] = max(0, random_burn)
-    
     def _compute_rolling_average_reward(self, t):
         """Compute rolling average reward for fee calculations."""
         start = max(0, t - self.fee_lookback_window + 1)
@@ -368,8 +350,8 @@ class BitRobotSupplyModel:
         # Fees for new subnets - using static subnet fee
         fee_subnet_reg = new_subnets * self.F_base_subnet
 
-        # Maintenance fees for subnets - using percentage of rewards
-        R_e = self.emissions[t] / max(len(self.subnet_registry), 1)  # Rewards per subnet
+        # Maintenance fees for subnets - using percentage of subnet rewards (not total emissions)
+        R_e = self.subnet_rewards[t] / max(len(self.subnet_registry), 1)  # Rewards per subnet
         fee_subnet_maint = len(self.subnet_registry) * R_e * self.subnet_maintenance_fee_pct
 
         total_fees = fee_ent + fee_subnet_reg + fee_subnet_maint
@@ -393,19 +375,10 @@ class BitRobotSupplyModel:
         self.calculate_investor_vesting()
         self.calculate_foundation_vesting()
         
-        # Calculate burn
-        self.calculate_burn()
-        
         # Initialize tracking arrays
         self.team_vested[0] = self.team_vesting[0]
         self.investor_vested[0] = self.investor_vesting[0]
         self.foundation_vested[0] = self.foundation_vesting[0]
-        self.circulating_supply[0] = self.team_vesting[0] + self.investor_vesting[0] + self.foundation_vesting[0] - self.total_locked_supply[0]
-        self.total_supply[0] = self.initial_supply
-        self.team_contribution[0] = self.team_vesting[0]
-        self.investor_contribution[0] = self.investor_vesting[0]
-        self.foundation_contribution[0] = self.foundation_vesting[0]
-        self.emissions_contribution[0] = 0
         
         # Initialize fee tracking for month 0
         fee_data = self._calculate_fees_for_month(0)
@@ -417,13 +390,28 @@ class BitRobotSupplyModel:
         self.total_fees[0] = fee_data['total_fees']
         self.cumulative_fees[0] = fee_data['total_fees']
         
+        # Initialize burn for month 0 (equal to total fees)
+        self.burn[0] = self.total_fees[0]
+        
         # Initialize collateral tracking for month 0
         self.locked_collateral[0] = self._calculate_locked_collateral(0)
         self.cumulative_locked_collateral[0] = self.locked_collateral[0]
         
+        # Calculate circulating supply before locking for month 0
+        circulating_before_locking = self.team_vested[0] + self.investor_vested[0] + self.foundation_vested[0] + self.cumulative_emissions[0] - np.sum(self.burn[:1])
+        
         # Initialize staking tracking for month 0
-        self.staking_supply[0] = self.total_supply[0] * self.staking_percentage
+        self.staking_supply[0] = circulating_before_locking * self.staking_percentage
         self.total_locked_supply[0] = self.locked_collateral[0] + self.staking_supply[0]
+        
+        # Initialize circulating supply for month 0
+        self.circulating_supply[0] = circulating_before_locking - self.total_locked_supply[0]
+        
+        # Initialize component contributions for month 0
+        self.team_contribution[0] = self.team_vesting[0]
+        self.investor_contribution[0] = self.investor_vesting[0]
+        self.foundation_contribution[0] = self.foundation_vesting[0]
+        self.emissions_contribution[0] = 0
         
         # Simulate each month
         for t in range(1, self.simulation_months + 1):
@@ -432,7 +420,7 @@ class BitRobotSupplyModel:
             self.investor_vested[t] = self.investor_vested[t-1] + self.investor_vesting[t]
             self.foundation_vested[t] = self.foundation_vested[t-1] + self.foundation_vesting[t]
             
-            # Calculate emissions
+            # Calculate total emissions first (needed for fee calculations)
             if t < self.t_burn:
                 self.emissions[t] = self.fixed_emissions[t]
             else:
@@ -442,7 +430,38 @@ class BitRobotSupplyModel:
                 else:
                     self.emissions[t] = self.fixed_emissions[t]
             
-            # Calculate fees for this month
+            # Split emissions between staking rewards and subnet rewards
+            self.staking_rewards[t] = self.emissions[t] * self.staking_rewards_allocation
+            self.subnet_rewards[t] = self.emissions[t] * (1 - self.staking_rewards_allocation)
+            
+            # Calculate per-staker rewards and APY
+            if self.staking_participants > 0:
+                self.per_staker_rewards[t] = self.staking_rewards[t] / self.staking_participants
+                
+                # Calculate APY: (annual rewards / staked amount) * 100
+                # Annual rewards = monthly rewards * 12
+                # Staked amount per participant = total staked supply / number of participants
+                # Note: staking_supply[t] will be calculated later, so we need to calculate it here
+                circulating_before_locking = (
+                    self.team_vested[t] + 
+                    self.investor_vested[t] + 
+                    self.foundation_vested[t] + 
+                    self.cumulative_emissions[t] - 
+                    np.sum(self.burn[:t+1])
+                )
+                current_staking_supply = circulating_before_locking * self.staking_percentage
+                
+                if current_staking_supply > 0:
+                    staked_amount_per_participant = current_staking_supply / self.staking_participants
+                    annual_rewards_per_participant = self.per_staker_rewards[t] * 12
+                    self.staking_apy[t] = (annual_rewards_per_participant / staked_amount_per_participant) * 100
+                else:
+                    self.staking_apy[t] = 0
+            else:
+                self.per_staker_rewards[t] = 0
+                self.staking_apy[t] = 0
+            
+            # Calculate fees for this month (now emissions[t] is available)
             fee_data = self._calculate_fees_for_month(t)
             self.active_ents[t] = fee_data['active_ents']
             self.active_subnets[t] = fee_data['active_subnets']
@@ -450,6 +469,9 @@ class BitRobotSupplyModel:
             self.fees_subnet_reg[t] = fee_data['fees_subnet_reg']
             self.fees_subnet_maint[t] = fee_data['fees_subnet_maint']
             self.total_fees[t] = fee_data['total_fees']
+            
+            # Set burn equal to total fees collected
+            self.burn[t] = self.total_fees[t]
             
             # Update cumulative emissions
             self.cumulative_emissions[t] = self.cumulative_emissions[t-1] + self.emissions[t]
@@ -460,28 +482,25 @@ class BitRobotSupplyModel:
             # Update cumulative fees
             self.cumulative_fees[t] = self.cumulative_fees[t-1] + self.total_fees[t]
             
-            # Update total supply (initial supply + cumulative emissions)
-            self.total_supply[t] = self.initial_supply + np.sum(self.emissions[:t+1])
-            
             # Update collateral tracking - use individual subnet tracking for smooth behavior
             self.locked_collateral[t] = self._calculate_locked_collateral(t)
             self.cumulative_locked_collateral[t] = self.locked_collateral[t]  # This is the current total locked, not cumulative
             
-            # Update staking tracking
-            self.staking_supply[t] = self.total_supply[t] * self.staking_percentage
-            self.total_locked_supply[t] = self.locked_collateral[t] + self.staking_supply[t]
-            
-
-            
-            # Update circulating supply and component contributions
-            self.circulating_supply[t] = (
+            # Calculate circulating supply before locking
+            circulating_before_locking = (
                 self.team_vested[t] + 
                 self.investor_vested[t] + 
                 self.foundation_vested[t] + 
                 self.cumulative_emissions[t] - 
-                np.sum(self.burn[:t+1]) -
-                self.total_locked_supply[t]  # Subtract total locked supply (collateral + staking) from circulating supply
+                np.sum(self.burn[:t+1])
             )
+            
+            # Update staking tracking - now based on circulating supply before locking
+            self.staking_supply[t] = circulating_before_locking * self.staking_percentage
+            self.total_locked_supply[t] = self.locked_collateral[t] + self.staking_supply[t]
+            
+            # Update circulating supply - subtract locked supply from circulating before locking
+            self.circulating_supply[t] = circulating_before_locking - self.total_locked_supply[t]
             
             self.team_contribution[t] = self.team_vested[t]
             self.investor_contribution[t] = self.investor_vested[t]
@@ -512,7 +531,6 @@ class BitRobotSupplyModel:
             'Cumulative Emissions': self.cumulative_emissions,
             'Cumulative Fixed Emissions': self.cumulative_fixed_emissions,
             'Circulating Supply': self.circulating_supply,
-            'Total Supply': self.total_supply,
             'Team Contribution': self.team_contribution,
             'Investor Contribution': self.investor_contribution,
             'Foundation Contribution': self.foundation_contribution,
@@ -530,6 +548,11 @@ class BitRobotSupplyModel:
             'Cumulative Locked Collateral': self.cumulative_locked_collateral,
             # Staking tracking data
             'Staking Supply': self.staking_supply,
-            'Total Locked Supply': self.total_locked_supply
+            'Total Locked Supply': self.total_locked_supply,
+            # Staking rewards tracking data
+            'Staking Rewards': self.staking_rewards,
+            'Subnet Rewards': self.subnet_rewards,
+            'Per Staker Rewards': self.per_staker_rewards,
+            'Staking APY': self.staking_apy
         })
         return df
