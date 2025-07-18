@@ -25,6 +25,10 @@ class BitRobotSupplyModel:
                  static_year2=64_000_000,
                  static_year3=40_000_000,
                  static_year4=16_000_000,
+                 # Percentage schedule parameters
+                 percentage_start_pct=1.0,
+                 percentage_end_pct=0.3,
+                 percentage_total_emissions=200_000_000,
                  # Fee simulation parameters
                  lambda_ent=20,
                  lambda_subnet=10,
@@ -64,7 +68,7 @@ class BitRobotSupplyModel:
         - burn_emission_factor: Factor to multiply burn sum by for emissions (default: 0.9)
         - burn_lookback_months: Number of months to look back for burn sum (default: 12)
         - simulation_months: Total number of months to simulate (default: 120)
-        - emissions_schedule_type: Type of emissions schedule ("static", "linear", "exponential") (default: "static")
+        - emissions_schedule_type: Type of emissions schedule ("static", "linear", "exponential", "percentage") (default: "static")
         - linear_start_emission: Starting monthly emission for linear schedule (default: 12M)
         - linear_end_emission: Ending monthly emission for linear schedule (default: 2M)
         - linear_total_emissions: Target total emissions for linear schedule (default: 200M)
@@ -74,6 +78,9 @@ class BitRobotSupplyModel:
         - static_year2: Year 2 emission for static schedule (default: 64M)
         - static_year3: Year 3 emission for static schedule (default: 40M)
         - static_year4: Year 4 emission for static schedule (default: 16M)
+        - percentage_start_pct: Starting monthly emission as percentage of 1B total supply (default: 1.0)
+        - percentage_end_pct: Ending monthly emission as percentage of 1B total supply (default: 0.3)
+        - percentage_total_emissions: Target total emissions for percentage schedule (default: 200M)
         - lambda_ent: Average number of new ENTs per month (default: 20)
         - lambda_subnet: Average number of new subnets per month (default: 10)
         - starting_ents: Number of ENTs at simulation start (default: 0)
@@ -120,6 +127,11 @@ class BitRobotSupplyModel:
         self.static_year2 = static_year2
         self.static_year3 = static_year3
         self.static_year4 = static_year4
+        
+        # Percentage schedule parameters
+        self.percentage_start_pct = percentage_start_pct
+        self.percentage_end_pct = percentage_end_pct
+        self.percentage_total_emissions = percentage_total_emissions
         
         # Fee simulation parameters
         self.lambda_ent = lambda_ent
@@ -215,6 +227,8 @@ class BitRobotSupplyModel:
             self._set_linear_fixed_emissions()
         elif self.emissions_schedule_type == "exponential":
             self._set_exponential_fixed_emissions()
+        elif self.emissions_schedule_type == "percentage":
+            self._set_percentage_fixed_emissions()
         else:
             raise ValueError(f"Unknown emissions schedule type: {self.emissions_schedule_type}")
         
@@ -283,6 +297,36 @@ class BitRobotSupplyModel:
             for month in range(1, 49):  # months 1-48
                 emission = self.exponential_start_emission * np.exp(-decay_rate * (month - 1))
                 self.fixed_emissions[month] = emission
+            
+    def _set_percentage_fixed_emissions(self):
+        """Set a percentage-based emissions schedule that scales linearly from start to end over 48 months."""
+        # Total supply is 1 billion
+        total_supply = 1_000_000_000
+        
+        # Calculate the total percentage emissions needed
+        total_percentage_emissions = self.percentage_total_emissions
+        
+        # Calculate what the start and end percentages should be to achieve total_percentage_emissions
+        # We want: total_percentage_emissions = (start_pct + end_pct) * 48 / 2 * total_supply / 100
+        # So: start_pct + end_pct = total_percentage_emissions * 2 / 48 * 100 / total_supply
+        required_sum = total_percentage_emissions * 2 / 48 * 100 / total_supply
+        
+        # If user provided start and end don't sum to required_sum, adjust them proportionally
+        current_sum = self.percentage_start_pct + self.percentage_end_pct
+        if abs(current_sum - required_sum) > 1e-9:  # Allow small floating point differences
+            # Scale both values proportionally to achieve the required total
+            scale_factor = required_sum / current_sum
+            adjusted_start_pct = self.percentage_start_pct * scale_factor
+            adjusted_end_pct = self.percentage_end_pct * scale_factor
+        else:
+            adjusted_start_pct = self.percentage_start_pct
+            adjusted_end_pct = self.percentage_end_pct
+            
+        # Calculate monthly emissions as a percentage of total supply
+        for month in range(1, 49):  # months 1-48
+            # Linear interpolation: emission_pct = start_pct + (end_pct - start_pct) * (month - 1) / 47
+            emission_pct = adjusted_start_pct + (adjusted_end_pct - adjusted_start_pct) * (month - 1) / 47
+            self.fixed_emissions[month] = total_supply * emission_pct / 100
             
     def calculate_team_vesting(self):
         """Calculate the monthly team vesting schedule."""

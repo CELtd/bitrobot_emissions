@@ -23,8 +23,8 @@ st.sidebar.header("Configuration")
 with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
     emissions_schedule_type = st.selectbox(
         "Emissions Schedule Type",
-        ["static", "linear", "exponential"],
-        index=2,
+        ["static", "linear", "exponential", "percentage"],
+        index=3,
         help="Choose the static emissions schedule type."
     )
 
@@ -145,6 +145,48 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
         exponential_start_emission = 12_000_000
         exponential_end_emission = 2_000_000
 
+    # Percentage schedule parameters (only show if percentage is selected)
+    if emissions_schedule_type == "percentage":
+        percentage_total_emissions = st.number_input(
+            "Percentage Total Emissions (tokens)",
+            value=273_000_000,
+            min_value=0,
+            max_value=500_000_000,
+            step=1_000_000,
+            help="Total tokens to emit over 48 months for percentage schedule."
+        )
+        
+        percentage_start_pct = st.number_input(
+            "Percentage Start (% of 1B supply per month)",
+            value=1.0,
+            min_value=0.1,
+            max_value=10.0,
+            step=0.1,
+            help="Starting monthly emission as percentage of 1 billion total supply."
+        )
+        percentage_end_pct = st.number_input(
+            "Percentage End (% of 1B supply per month)",
+            value=0.3,
+            min_value=0.01,
+            max_value=10.0,
+            step=0.01,
+            help="Ending monthly emission as percentage of 1 billion total supply."
+        )
+        
+        # Calculate what the actual total would be with current start/end values
+        raw_total = (percentage_start_pct + percentage_end_pct) * 48 / 2 * 1_000_000_000 / 100
+        
+        # Show if values need adjustment
+        if abs(raw_total - percentage_total_emissions) > 1_000_000:  # Allow 1M tolerance
+            st.warning(f"⚠️ Start/end percentages will be automatically scaled to achieve {percentage_total_emissions:,.0f} total emissions")
+            st.caption(f"Raw calculation: {raw_total:,.0f} tokens")
+        else:
+            st.success(f"✅ Start/end percentages will achieve {percentage_total_emissions:,.0f} total emissions")
+    else:
+        percentage_start_pct = 1.0
+        percentage_end_pct = 0.3
+        percentage_total_emissions = 200_000_000
+
 simulation_months = st.number_input(
     "Simulation Months",
     value=120,
@@ -153,7 +195,7 @@ simulation_months = st.number_input(
 )
 
 # Create tabs
-tab1, tab2 = st.tabs(["Emissions Schedule", "Fee Simulation"])
+tab1, tab2, tab3 = st.tabs(["Emissions Schedule", "Fee Simulation", "📊 Download Data"])
 
 with tab1:
     st.header("Emissions Schedule Analysis")
@@ -472,6 +514,9 @@ with tab1:
                 'static_year4': static_year4,
                 'exponential_start_emission': exponential_start_emission,
                 'exponential_end_emission': exponential_end_emission,
+                'percentage_start_pct': percentage_start_pct,
+                'percentage_end_pct': percentage_end_pct,
+                'percentage_total_emissions': percentage_total_emissions,
                 'starting_ents': st.session_state.starting_ents,
                 'starting_subnets': st.session_state.starting_subnets,
                 'ent_lifetime': st.session_state.ent_lifetime,
@@ -1871,3 +1916,339 @@ with tab2:
             st.markdown("### Bullish Scenario")
             st.markdown("---")
             display_earnings_metrics(bull_yearly, token_price, st.session_state.subnet_collateral_amount) 
+
+with tab3:
+    st.header("📊 Download Simulation Data")
+    
+    if 'results_dfs' in st.session_state:
+        results_dfs = st.session_state.results_dfs
+        
+        # Create comprehensive data with all scenarios and calculated columns
+        scenario_data = {}
+        scenarios = ['bear', 'neutral', 'bull']
+        scenario_names = ['Bear', 'Neutral', 'Bull']
+        
+        for scenario, scenario_name in zip(scenarios, scenario_names):
+            df = results_dfs[scenario].copy()
+            
+            # Add calculated supply columns for this scenario
+            df['Cumulative Burn'] = df['Burn'].cumsum()
+            df['Net Supply Change'] = df['Emissions'] - df['Burn']
+            df['Cumulative Net Supply Change'] = (df['Emissions'] - df['Burn']).cumsum()
+            df['Total Supply'] = df['Circulating Supply'] + df['Total Locked Supply']
+            df['Locked % of Circulating'] = (df['Total Locked Supply'] / df['Circulating Supply'] * 100).fillna(0)
+            df['Staking % of Circulating'] = (df['Staking Supply'] / df['Circulating Supply'] * 100).fillna(0)
+            df['Collateral % of Circulating'] = (df['Locked Collateral'] / df['Circulating Supply'] * 100).fillna(0)
+            
+            # Add calculated fee metrics for this scenario
+            # Average reward per subnet
+            avg_reward_per_subnet = []
+            for i, month in enumerate(df['Month']):
+                active_subnets = df['Active Subnets'].iloc[i]
+                monthly_emission = df['Subnet Rewards'].iloc[i]
+                avg_reward = monthly_emission / max(active_subnets, 1)
+                avg_reward_per_subnet.append(avg_reward)
+            df['Avg Reward per Subnet'] = avg_reward_per_subnet
+            
+            # Net reward per subnet (after fees)
+            net_reward_per_subnet = []
+            for i, month in enumerate(df['Month']):
+                active_subnets = df['Active Subnets'].iloc[i]
+                monthly_emission = df['Subnet Rewards'].iloc[i]
+                subnet_reg_fees = df['Subnet Registration Fees'].iloc[i]
+                subnet_maint_fees = df['Subnet Maintenance Fees'].iloc[i]
+                
+                gross_reward_per_subnet = monthly_emission / max(active_subnets, 1)
+                amortized_reg_fee = subnet_reg_fees / max(active_subnets, 1) / 12
+                maint_fee_per_subnet = subnet_maint_fees / max(active_subnets, 1)
+                
+                net_reward = gross_reward_per_subnet - maint_fee_per_subnet - amortized_reg_fee
+                net_reward_per_subnet.append(max(0, net_reward))
+            df['Net Reward per Subnet'] = net_reward_per_subnet
+            
+            # ROI per subnet (net reward / collateral)
+            collateral_amount = st.session_state.subnet_collateral_amount
+            df['Subnet ROI %'] = (df['Net Reward per Subnet'] / collateral_amount * 100).fillna(0)
+            
+            # Monthly fee revenue per active subnet
+            df['Fees per Active Subnet'] = (df['Total Fees'] / df['Active Subnets']).fillna(0)
+            
+            # Monthly fee revenue per active ENT
+            df['Fees per Active ENT'] = (df['Total Fees'] / df['Active ENTs']).fillna(0)
+            
+            scenario_data[scenario] = df
+        
+        # 1. Individual Scenario Downloads (Supply + Fee data combined)
+        st.subheader("📥 Download Individual Scenarios")
+        st.markdown("Each scenario includes all supply components, fees, and calculated metrics.")
+        st.info("💡 **Note:** 'Vested' columns show cumulative totals (what's actually available in circulation), not monthly vesting amounts.")
+        
+        # Monthly downloads
+        st.markdown("**📅 Monthly Data Downloads:**")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Filter out monthly vesting columns to keep only the important ones
+            bear_df_clean = scenario_data['bear'].drop(columns=['Team Vesting', 'Investor Vesting', 'Foundation Vesting'])
+            bear_csv = bear_df_clean.to_csv(index=False)
+            st.download_button(
+                label="🐻 Bear Scenario (Monthly)",
+                data=bear_csv,
+                file_name=f"bitrobot_bear_scenario_monthly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bear scenario monthly data with all supply components, fees, and calculated metrics."
+            )
+        
+        with col2:
+            # Filter out monthly vesting columns to keep only the important ones
+            neutral_df_clean = scenario_data['neutral'].drop(columns=['Team Vesting', 'Investor Vesting', 'Foundation Vesting'])
+            neutral_csv = neutral_df_clean.to_csv(index=False)
+            st.download_button(
+                label="⚖️ Neutral Scenario (Monthly)",
+                data=neutral_csv,
+                file_name=f"bitrobot_neutral_scenario_monthly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Neutral scenario monthly data with all supply components, fees, and calculated metrics."
+            )
+        
+        with col3:
+            # Filter out monthly vesting columns to keep only the important ones
+            bull_df_clean = scenario_data['bull'].drop(columns=['Team Vesting', 'Investor Vesting', 'Foundation Vesting'])
+            bull_csv = bull_df_clean.to_csv(index=False)
+            st.download_button(
+                label="🐂 Bull Scenario (Monthly)",
+                data=bull_csv,
+                file_name=f"bitrobot_bull_scenario_monthly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bull scenario monthly data with all supply components, fees, and calculated metrics."
+            )
+        
+        # Yearly aggregate downloads
+        st.markdown("**📊 Yearly Aggregate Downloads:**")
+        col1, col2, col3 = st.columns(3)
+        
+        def create_yearly_aggregate(df, scenario_name):
+            """Create yearly aggregate data from monthly data"""
+            yearly_data = []
+            
+            for year in range(1, 11):  # Years 1-10 (120 months)
+                start_month = (year - 1) * 12 + 1
+                end_month = year * 12
+                
+                # Filter data for this year
+                year_data = df[(df['Month'] >= start_month) & (df['Month'] <= end_month)]
+                
+                if len(year_data) > 0:
+                    # Calculate yearly aggregates
+                    yearly_row = {
+                        'Year': year,
+                        'Start Month': start_month,
+                        'End Month': end_month,
+                        'Months in Year': len(year_data)
+                    }
+                    
+                    # Sum columns (cumulative values)
+                    sum_columns = [
+                        'Emissions', 'Burn', 'Total Fees', 'ENT Registration Fees', 
+                        'Subnet Registration Fees', 'Subnet Maintenance Fees', 'Cumulative Fees',
+                        'Staking Rewards', 'Subnet Rewards', 'Cumulative Burn', 'Net Supply Change'
+                    ]
+                    
+                    for col in sum_columns:
+                        if col in year_data.columns:
+                            yearly_row[f'Total {col}'] = year_data[col].sum()
+                    
+                    # Average columns (flow values)
+                    avg_columns = [
+                        'Active ENTs', 'Active Subnets', 'Staking Supply', 'Locked Collateral',
+                        'Total Locked Supply', 'Per Staker Rewards', 'Staking APY',
+                        'Avg Reward per Subnet', 'Net Reward per Subnet', 'Subnet ROI %',
+                        'Fees per Active Subnet', 'Fees per Active ENT'
+                    ]
+                    
+                    for col in avg_columns:
+                        if col in year_data.columns:
+                            yearly_row[f'Avg {col}'] = year_data[col].mean()
+                    
+                    # End-of-year values (stock values)
+                    end_columns = [
+                        'Circulating Supply', 'Team Vested', 'Investor Vested', 'Foundation Vested',
+                        'Total Supply', 'Locked % of Circulating', 'Staking % of Circulating',
+                        'Collateral % of Circulating'
+                    ]
+                    
+                    for col in end_columns:
+                        if col in year_data.columns:
+                            yearly_row[f'End of Year {col}'] = year_data[col].iloc[-1]
+                    
+                    # Calculate some additional metrics
+                    if 'Total Emissions' in yearly_row and 'Total Burn' in yearly_row:
+                        yearly_row['Net Emissions'] = yearly_row['Total Emissions'] - yearly_row['Total Burn']
+                    
+                    if 'Total Subnet Rewards' in yearly_row and 'Total Subnet Registration Fees' in yearly_row and 'Total Subnet Maintenance Fees' in yearly_row:
+                        yearly_row['Net Subnet Rewards'] = yearly_row['Total Subnet Rewards'] - yearly_row['Total Subnet Registration Fees'] - yearly_row['Total Subnet Maintenance Fees']
+                    
+                    yearly_data.append(yearly_row)
+            
+            return pd.DataFrame(yearly_data)
+        
+        with col1:
+            bear_yearly = create_yearly_aggregate(scenario_data['bear'], 'Bear')
+            bear_yearly_csv = bear_yearly.to_csv(index=False)
+            st.download_button(
+                label="🐻 Bear Scenario (Yearly)",
+                data=bear_yearly_csv,
+                file_name=f"bitrobot_bear_scenario_yearly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bear scenario yearly aggregate data with annual totals and averages."
+            )
+        
+        with col2:
+            neutral_yearly = create_yearly_aggregate(scenario_data['neutral'], 'Neutral')
+            neutral_yearly_csv = neutral_yearly.to_csv(index=False)
+            st.download_button(
+                label="⚖️ Neutral Scenario (Yearly)",
+                data=neutral_yearly_csv,
+                file_name=f"bitrobot_neutral_scenario_yearly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Neutral scenario yearly aggregate data with annual totals and averages."
+            )
+        
+        with col3:
+            bull_yearly = create_yearly_aggregate(scenario_data['bull'], 'Bull')
+            bull_yearly_csv = bull_yearly.to_csv(index=False)
+            st.download_button(
+                label="🐂 Bull Scenario (Yearly)",
+                data=bull_yearly_csv,
+                file_name=f"bitrobot_bull_scenario_yearly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bull scenario yearly aggregate data with annual totals and averages."
+            )
+        
+        # 2. Comprehensive Comparison CSV
+        st.subheader("📊 Download Scenario Comparison")
+        st.markdown("Key metrics across all scenarios for easy side-by-side analysis.")
+        
+        # Select key columns for comparison
+        key_columns = [
+            'Month', 'Circulating Supply', 'Total Locked Supply', 'Emissions', 'Burn', 
+            'Total Fees', 'Active Subnets', 'Per Staker Rewards', 'Staking APY',
+            'Cumulative Burn', 'Net Supply Change', 'Locked % of Circulating',
+            'Avg Reward per Subnet', 'Net Reward per Subnet', 'Subnet ROI %'
+        ]
+        
+        comparison_df = pd.DataFrame({'Month': scenario_data['neutral']['Month']})
+        
+        for scenario, scenario_name in zip(scenarios, scenario_names):
+            for col in key_columns:
+                if col in scenario_data[scenario].columns:
+                    comparison_df[f'{col} ({scenario_name})'] = scenario_data[scenario][col]
+        
+        # Add range columns for easy comparison
+        comparison_df['Circulating Supply Range (Max-Min)'] = comparison_df[['Circulating Supply (Bear)', 'Circulating Supply (Neutral)', 'Circulating Supply (Bull)']].max(axis=1) - comparison_df[['Circulating Supply (Bear)', 'Circulating Supply (Neutral)', 'Circulating Supply (Bull)']].min(axis=1)
+        comparison_df['Total Fees Range (Max-Min)'] = comparison_df[['Total Fees (Bear)', 'Total Fees (Neutral)', 'Total Fees (Bull)']].max(axis=1) - comparison_df[['Total Fees (Bear)', 'Total Fees (Neutral)', 'Total Fees (Bull)']].min(axis=1)
+        comparison_df['Per Staker Rewards Range (Max-Min)'] = comparison_df[['Per Staker Rewards (Bear)', 'Per Staker Rewards (Neutral)', 'Per Staker Rewards (Bull)']].max(axis=1) - comparison_df[['Per Staker Rewards (Bear)', 'Per Staker Rewards (Neutral)', 'Per Staker Rewards (Bull)']].min(axis=1)
+        comparison_df['Net Reward per Subnet Range (Max-Min)'] = comparison_df[['Net Reward per Subnet (Bear)', 'Net Reward per Subnet (Neutral)', 'Net Reward per Subnet (Bull)']].max(axis=1) - comparison_df[['Net Reward per Subnet (Bear)', 'Net Reward per Subnet (Neutral)', 'Net Reward per Subnet (Bull)']].min(axis=1)
+        
+        comparison_csv = comparison_df.to_csv(index=False)
+        
+        st.download_button(
+            label="📈 Download Scenario Comparison CSV",
+            data=comparison_csv,
+            file_name=f"bitrobot_scenario_comparison_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            help="Download key metrics comparison across all scenarios for easy analysis."
+        )
+        
+        # 3. Complete Master CSV (Everything)
+        st.subheader("📋 Download Complete Master CSV")
+        st.markdown("All data from all scenarios in one comprehensive file.")
+        
+        # Create master CSV with all scenarios and all columns
+        master_df = scenario_data['neutral'].copy()
+        
+        # Rename neutral columns
+        neutral_columns = {col: f"{col} (Neutral)" for col in master_df.columns if col != 'Month'}
+        master_df = master_df.rename(columns=neutral_columns)
+        
+        # Add bear and bull columns
+        for col in scenario_data['bear'].columns:
+            if col != 'Month':
+                master_df[f"{col} (Bear)"] = scenario_data['bear'][col]
+        
+        for col in scenario_data['bull'].columns:
+            if col != 'Month':
+                master_df[f"{col} (Bull)"] = scenario_data['bull'][col]
+        
+        master_csv = master_df.to_csv(index=False)
+        
+        st.download_button(
+            label="📚 Download Complete Master CSV",
+            data=master_csv,
+            file_name=f"bitrobot_complete_master_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            help="Download all simulation data from all scenarios in one comprehensive file."
+        )
+        
+        # Show column descriptions
+        with st.expander("📋 CSV Column Descriptions"):
+            st.markdown("""
+            **Monthly Individual Scenario CSVs include:**
+            - `Month`: Simulation month (0-120)
+            - `Team Vested`: Cumulative team tokens vested (total available)
+            - `Investor Vested`: Cumulative investor tokens vested (total available)
+            - `Foundation Vested`: Cumulative foundation tokens vested (total available)
+            - `Emissions`: Monthly token emissions
+            - `Burn`: Monthly tokens burned (equals total fees)
+            - `Circulating Supply`: Available tokens in circulation
+            - `Total Locked Supply`: Tokens locked in staking + collateral
+            - `ENT Registration Fees`: Monthly ENT registration fees
+            - `Subnet Registration Fees`: Monthly subnet registration fees
+            - `Subnet Maintenance Fees`: Monthly subnet maintenance fees
+            - `Total Fees`: Combined monthly fees
+            - `Cumulative Fees`: Running total of all fees
+            - `Staking Supply`: Tokens locked in staking
+            - `Staking Rewards`: Monthly rewards for stakers
+            - `Subnet Rewards`: Monthly rewards for subnets
+            - `Per Staker Rewards`: Average rewards per staking participant
+            - `Staking APY`: Annual percentage yield for staking
+            - `Cumulative Burn`: Running total of burned tokens
+            - `Net Supply Change`: Monthly emissions minus burn
+            - `Total Supply`: Circulating + locked supply
+            - `Locked % of Circulating`: Percentage of circulating supply that is locked
+            - `Staking % of Circulating`: Percentage of circulating supply in staking
+            - `Collateral % of Circulating`: Percentage of circulating supply as collateral
+            - `Avg Reward per Subnet`: Average gross rewards per subnet
+            - `Net Reward per Subnet`: Average net rewards per subnet (after fees)
+            - `Subnet ROI %`: Return on investment for subnet operators
+            - `Fees per Active Subnet`: Average fees paid per active subnet
+            - `Fees per Active ENT`: Average fees paid per active ENT
+            
+            **Yearly Individual Scenario CSVs include:**
+            - `Year`: Year number (1-10)
+            - `Start Month` / `End Month`: Month range for the year
+            - `Months in Year`: Number of months with data
+            - `Total [Metric]`: Annual sum for flow metrics (emissions, fees, rewards, etc.)
+            - `Avg [Metric]`: Annual average for stock metrics (active entities, APY, etc.)
+            - `End of Year [Metric]`: Value at the end of the year for cumulative metrics
+            - `Net Emissions`: Total emissions minus total burn for the year
+            - `Net Subnet Rewards`: Total subnet rewards minus total fees for the year
+            
+            **Note:** "Vested" columns show cumulative totals (what's actually available), not monthly vesting amounts.
+            
+            **Comparison CSV includes:**
+            - Key metrics for all scenarios side-by-side
+            - Range columns showing differences between scenarios
+            - Focused on the most important metrics for analysis
+            
+            **Master CSV includes:**
+            - All columns from all scenarios (including monthly vesting amounts)
+            - Complete dataset for advanced analysis
+            """)
+        
+        # Show data preview
+        with st.expander("👀 Preview Comparison Data (First 10 rows)"):
+            st.dataframe(comparison_df.head(10), use_container_width=True)
+    
+    else:
+        st.info("Run the simulation first to generate downloadable results.")
