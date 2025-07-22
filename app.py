@@ -149,7 +149,7 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
     if emissions_schedule_type == "percentage":
         percentage_total_emissions = st.number_input(
             "Percentage Total Emissions (tokens)",
-            value=273_000_000,
+            value=250_000_000,
             min_value=0,
             max_value=500_000_000,
             step=1_000_000,
@@ -158,7 +158,7 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
         
         percentage_start_pct = st.number_input(
             "Percentage Start (% of 1B supply per month)",
-            value=1.0,
+            value=0.8,
             min_value=0.1,
             max_value=10.0,
             step=0.1,
@@ -166,7 +166,7 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
         )
         percentage_end_pct = st.number_input(
             "Percentage End (% of 1B supply per month)",
-            value=0.3,
+            value=0.25,
             min_value=0.01,
             max_value=10.0,
             step=0.01,
@@ -183,9 +183,9 @@ with st.sidebar.expander("Emissions Schedule Configuration", expanded=True):
         else:
             st.success(f"✅ Start/end percentages will achieve {percentage_total_emissions:,.0f} total emissions")
     else:
-        percentage_start_pct = 1.0
-        percentage_end_pct = 0.3
-        percentage_total_emissions = 200_000_000
+        percentage_start_pct = 0.8
+        percentage_end_pct = 0.25
+        percentage_total_emissions = 250_000_000
 
 simulation_months = st.number_input(
     "Simulation Months",
@@ -324,7 +324,7 @@ with tab1:
         
         staking_percentage = st.slider(
             "Staking Percentage (% of Circulating Supply)", 
-            value=10.0,
+            value=30.0,
             min_value=0.0,
             max_value=50.0,
             step=0.5,
@@ -332,14 +332,36 @@ with tab1:
             key="staking_percentage"
         )
         
-        staking_rewards_allocation = st.slider(
-            "Staking Rewards Allocation (% of Total Emissions)", 
-            value=5.0,
+
+        
+        target_staking_percentage = st.slider(
+            "Target Staking Percentage (% of Circulating Supply)", 
+            value=30.0,
+            min_value=10.0,
+            max_value=80.0,
+            step=5.0,
+            help="Target percentage of circulating supply that should be staked for optimal APY",
+            key="target_staking_percentage"
+        )
+        
+        target_staking_apy = st.slider(
+            "Target Staking APY (% per year)", 
+            value=4.0,
             min_value=1.0,
             max_value=20.0,
             step=0.5,
-            help="Percentage of total emissions allocated to stakers (remainder goes to subnets)",
-            key="staking_rewards_allocation"
+            help="Target annual percentage yield for stakers when target staking percentage is reached",
+            key="target_staking_apy"
+        )
+        
+        subnet_min_emissions_pct = st.slider(
+            "Subnet Minimum Emissions (%)", 
+            value=80.0,
+            min_value=50.0,
+            max_value=95.0,
+            step=5.0,
+            help="Minimum percentage of emissions guaranteed to subnets (remainder available for staking)",
+            key="subnet_min_emissions_pct"
         )
         
         st.subheader("Scenario Parameters")
@@ -526,7 +548,9 @@ with tab1:
                 'subnet_maintenance_fee_pct': st.session_state.subnet_maintenance_fee_pct / 100.0,
                 'subnet_collateral_amount': st.session_state.subnet_collateral_amount,
                 'staking_percentage': st.session_state.staking_percentage / 100.0,
-                'staking_rewards_allocation': st.session_state.staking_rewards_allocation / 100.0
+                'target_staking_percentage': st.session_state.target_staking_percentage / 100.0,
+                'target_staking_apy': st.session_state.target_staking_apy / 100.0,
+                'subnet_min_emissions_pct': st.session_state.subnet_min_emissions_pct / 100.0
             }
             
             # Bear scenario (lower growth)
@@ -734,7 +758,7 @@ with tab1:
         target_month = 48
         month_data = results_df[results_df['Month'] == target_month].iloc[0]
         
-        print(month_data)
+        # print(month_data)
         # Calculate the cumulative supply for each component
         # Combine staking and subnet rewards as community
         community_supply = results_df['Staking Rewards'].cumsum().iloc[48] + results_df['Subnet Rewards'].cumsum().iloc[48]
@@ -862,7 +886,7 @@ with tab2:
             "BRB Token Price ($)",
             min_value=0.01,
             max_value=5.0,
-            value=0.10,
+            value=0.30,
             step=0.01,
             help="Set the BRB token price in USD"
         )
@@ -946,8 +970,8 @@ with tab2:
             ))
         ).properties(
             title='Active ENTs Over Time',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -962,8 +986,8 @@ with tab2:
             ))
         ).properties(
             title='Active Subnets Over Time',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -980,6 +1004,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         active_subnets_chart = alt.layer(active_subnets_chart, vertical_line).configure_view(
@@ -987,6 +1014,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 2: Fee Categories Over Time (all scenarios)
@@ -1057,6 +1087,21 @@ with tab2:
         
         fee_categories_data = pd.DataFrame(fee_categories_data)
         
+        # # Debug: Print fee categories data to check for differences between scenarios
+        # st.write("### Debug: Fee Categories Data")
+        # st.write("Sample of fee categories data (first 10 rows):")
+        # st.dataframe(fee_categories_data.head(10))
+        
+        # # Check for differences between scenarios
+        # st.write("### Debug: Fee Values by Scenario")
+        # for scenario in ['Bearish', 'Neutral', 'Bullish']:
+        #     scenario_data = fee_categories_data[fee_categories_data['Scenario'] == scenario]
+        #     st.write(f"**{scenario} Scenario - Sample values:**")
+        #     st.write(f"ENT Registration Fees: {scenario_data[scenario_data['Type'] == 'ENT Registration']['Amount'].head(5).tolist()}")
+        #     st.write(f"Subnet Registration Fees: {scenario_data[scenario_data['Type'] == 'Subnet Registration']['Amount'].head(5).tolist()}")
+        #     st.write(f"Subnet Maintenance Fees: {scenario_data[scenario_data['Type'] == 'Subnet Maintenance']['Amount'].head(5).tolist()}")
+        #     st.write("---")
+        
         fee_categories_chart = alt.Chart(fee_categories_data).mark_line().encode(
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Amount:Q', title='Fees (BRB)'),
@@ -1070,8 +1115,8 @@ with tab2:
             ))
         ).properties(
             title='Fee Categories Over Time',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1088,6 +1133,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 3: Cumulative Total Fees Collected (all scenarios)
@@ -1128,8 +1176,8 @@ with tab2:
             ))
         ).properties(
             title='Cumulative Total Fees Collected',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1146,6 +1194,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 4: Total Fees per Month (all scenarios)
@@ -1177,6 +1228,19 @@ with tab2:
         
         total_fees_data = pd.DataFrame(total_fees_data)
         
+        # Debug: Print total fees data to check for differences between scenarios
+        # st.write("### Debug: Total Fees Data")
+        # st.write("Sample of total fees data (first 10 rows):")
+        # st.dataframe(total_fees_data.head(10))
+        
+        # # Check for differences between scenarios
+        # st.write("### Debug: Total Fees by Scenario")
+        # for scenario in ['Bearish', 'Neutral', 'Bullish']:
+        #     scenario_data = total_fees_data[total_fees_data['Scenario'] == scenario]
+        #     st.write(f"**{scenario} Scenario - Sample values:**")
+        #     st.write(f"Total Fees: {scenario_data['Total Fees'].head(5).tolist()}")
+        #     st.write("---")
+        
         total_fees_chart = alt.Chart(total_fees_data).mark_line().encode(
             x=alt.X('Month:Q', title='Month'),
             y=alt.Y('Total Fees:Q', title='Total Fees (BRB)'),
@@ -1186,8 +1250,8 @@ with tab2:
             ))
         ).properties(
             title='Total Fees per Month',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1204,6 +1268,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 5: Average Reward per Subnet (all scenarios)
@@ -1256,8 +1323,8 @@ with tab2:
             ))
         ).properties(
             title='Average Reward per Subnet',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1274,6 +1341,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 6: Locked Supply Over Time (Neutral Scenario - Component Breakdown)
@@ -1313,8 +1383,8 @@ with tab2:
             )
         ).properties(
             title='Locked Supply Over Time (Neutral Scenario)',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1331,6 +1401,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Plot 6b: Total Locked Supply Over Time (All Scenarios)
@@ -1369,8 +1442,8 @@ with tab2:
             ))
         ).properties(
             title='Total Locked Supply Over Time (All Scenarios)',
-            width=450,
-            height=300
+            width=500,
+            height=350
         ).add_params(
             alt.selection_interval(bind='scales')
         )
@@ -1381,6 +1454,9 @@ with tab2:
         ).configure_axisLeft(
             labelPadding=10,
             titlePadding=10
+        ).configure_title(
+            fontSize=16,
+            fontWeight='bold'
         )
         
         # Display charts in a 2x3 grid

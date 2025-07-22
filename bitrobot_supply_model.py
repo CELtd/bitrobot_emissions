@@ -44,8 +44,10 @@ class BitRobotSupplyModel:
                  subnet_collateral_amount=100_000,
                  # Staking parameters
                  staking_percentage=0.0,
-                 staking_rewards_allocation=0.05,  # New parameter: percentage of emissions for stakers
+                 target_staking_percentage=0.3,  # Target percentage of circulating supply to be staked
                  staking_participants=1000,  # New parameter: number of staking participants
+                 target_staking_apy=0.04,  # Target APY for stakers (4% per year)
+                 subnet_min_emissions_pct=0.8,  # Minimum percentage of emissions guaranteed to subnets
                  alpha=0.5,
                  eta=0.5,
                  gamma=1.0,
@@ -93,12 +95,22 @@ class BitRobotSupplyModel:
         - subnet_maintenance_fee_pct: Percentage of rewards charged as maintenance fee (default: 0.05)
         - subnet_collateral_amount: Amount of tokens required as collateral per subnet (default: 100,000)
         - staking_percentage: Percentage of circulating supply that is staked (default: 0.0)
-        - staking_rewards_allocation: Percentage of total emissions allocated to stakers (default: 0.05)
+        - target_staking_percentage: Target percentage of circulating supply to be staked (default: 0.3)
         - staking_participants: Number of staking participants (default: 1000)
+        - target_staking_apy: Target APY for stakers (default: 0.04 = 4% per year)
+        - subnet_min_emissions_pct: Minimum percentage of emissions guaranteed to subnets (default: 0.8)
         - alpha, eta, gamma, delta, kappa: Fee model parameters (defaults: 0.5, 0.5, 1.0, 1.0, 0.05)
         - random_seed: Random seed for reproducibility (default: 42)
         
         Note: Burn is now calculated as total fees collected, not using stochastic simulation.
+        
+        Staking Rewards Mechanism:
+        - Target APY is specified (default: 4% per year = 0.33% per month)
+        - Target staking percentage is specified (default: 30% of circulating supply)
+        - Actual staking budget = monthly_rate * actual_staked_amount
+        - Subnets are guaranteed a minimum percentage of emissions (default: 80%)
+        - Staking rewards are capped at remaining emissions after subnet guarantee
+        - Actual APY is calculated based on actual rewards given and actual staked amount
         """
         # Validate allocations
         # if team_allocation + dao_allocation != initial_supply:
@@ -146,8 +158,10 @@ class BitRobotSupplyModel:
         self.subnet_maintenance_fee_pct = subnet_maintenance_fee_pct
         self.subnet_collateral_amount = subnet_collateral_amount
         self.staking_percentage = staking_percentage
-        self.staking_rewards_allocation = staking_rewards_allocation
+        self.target_staking_percentage = target_staking_percentage
         self.staking_participants = staking_participants
+        self.target_staking_apy = target_staking_apy
+        self.subnet_min_emissions_pct = subnet_min_emissions_pct
         self.alpha = alpha
         self.eta = eta
         self.gamma = gamma
@@ -210,6 +224,15 @@ class BitRobotSupplyModel:
         self.subnet_rewards = np.zeros(simulation_months + 1)
         self.per_staker_rewards = np.zeros(simulation_months + 1)
         self.staking_apy = np.zeros(simulation_months + 1)
+        
+        # New staking mechanism tracking arrays
+        self.target_staking_budget = np.zeros(simulation_months + 1)
+        self.actual_staking_budget = np.zeros(simulation_months + 1)
+        self.subnet_guaranteed_emissions = np.zeros(simulation_months + 1)
+        
+        # Additional tracking for deflationary regime
+        self.base_emissions = np.zeros(simulation_months + 1)  # Base emissions (fixed or burn-based)
+        self.additional_staking_emissions = np.zeros(simulation_months + 1)  # Additional minting for staking
         
         # Define fixed emissions schedule
         self.fixed_emissions = np.zeros(simulation_months + 1)
@@ -396,6 +419,7 @@ class BitRobotSupplyModel:
 
         # Maintenance fees for subnets - using percentage of subnet rewards (not total emissions)
         R_e = self.subnet_rewards[t] / max(len(self.subnet_registry), 1)  # Rewards per subnet
+        print(self.subnet_maintenance_fee_pct)
         fee_subnet_maint = len(self.subnet_registry) * R_e * self.subnet_maintenance_fee_pct
 
         total_fees = fee_ent + fee_subnet_reg + fee_subnet_maint
@@ -464,41 +488,69 @@ class BitRobotSupplyModel:
             self.investor_vested[t] = self.investor_vested[t-1] + self.investor_vesting[t]
             self.foundation_vested[t] = self.foundation_vested[t-1] + self.foundation_vesting[t]
             
-            # Calculate total emissions first (needed for fee calculations)
+            # Calculate base emissions first (needed for fee calculations)
             if t < self.t_burn:
-                self.emissions[t] = self.fixed_emissions[t]
+                self.base_emissions[t] = self.fixed_emissions[t]
             else:
                 if t >= self.burn_lookback_months:
                     burn_sum = np.sum(self.burn[t-self.burn_lookback_months:t])
-                    self.emissions[t] = self.burn_emission_factor * burn_sum / self.burn_lookback_months
+                    self.base_emissions[t] = self.burn_emission_factor * burn_sum / self.burn_lookback_months
                 else:
-                    self.emissions[t] = self.fixed_emissions[t]
+                    self.base_emissions[t] = self.fixed_emissions[t]
             
-            # Split emissions between staking rewards and subnet rewards
-            self.staking_rewards[t] = self.emissions[t] * self.staking_rewards_allocation
-            self.subnet_rewards[t] = self.emissions[t] * (1 - self.staking_rewards_allocation)
+            # Calculate circulating supply before locking for staking calculations
+            circulating_before_locking = (
+                self.team_vested[t] + 
+                self.investor_vested[t] + 
+                self.foundation_vested[t] + 
+                self.cumulative_emissions[t] - 
+                np.sum(self.burn[:t+1])
+            )
+            
+            # Calculate target staking budget based on target APY and target staking percentage
+            # Monthly rate = annual rate / 12
+            monthly_rate = self.target_staking_apy / 12
+            target_staked_amount = circulating_before_locking * self.target_staking_percentage
+            self.target_staking_budget[t] = monthly_rate * target_staked_amount
+            
+            # Calculate actual staking budget based on actual staked amount
+            actual_staked_amount = circulating_before_locking * self.staking_percentage
+            self.actual_staking_budget[t] = monthly_rate * actual_staked_amount
+            
+            # Different logic for fixed vs deflationary regime
+            if t < self.t_burn:
+                # Fixed emissions regime (first 48 months)
+                # Calculate guaranteed emissions for subnets
+                self.subnet_guaranteed_emissions[t] = self.base_emissions[t] * self.subnet_min_emissions_pct
+                
+                # Determine staking rewards: use actual budget, but cap at remaining emissions after subnet guarantee
+                max_staking_rewards = self.base_emissions[t] - self.subnet_guaranteed_emissions[t]
+                self.staking_rewards[t] = min(self.actual_staking_budget[t], max_staking_rewards)
+                self.additional_staking_emissions[t] = 0  # No additional minting in fixed regime
+                
+                # Subnet rewards get the remainder of base emissions
+                self.subnet_rewards[t] = self.base_emissions[t] - self.staking_rewards[t]
+            else:
+                # Deflationary regime (after 48 months)
+                # Subnets get all base emissions
+                self.subnet_rewards[t] = self.base_emissions[t]
+                self.subnet_guaranteed_emissions[t] = self.base_emissions[t]
+                
+                # Mint additional tokens for staking rewards to achieve target APY
+                self.additional_staking_emissions[t] = self.actual_staking_budget[t]
+                self.staking_rewards[t] = self.additional_staking_emissions[t]
+            
+            # Total emissions = base emissions + additional staking emissions
+            self.emissions[t] = self.base_emissions[t] + self.additional_staking_emissions[t]
             
             # Calculate per-staker rewards and APY
             if self.staking_participants > 0:
                 self.per_staker_rewards[t] = self.staking_rewards[t] / self.staking_participants
                 
-                # Calculate APY: (annual rewards / staked amount) * 100
-                # Annual rewards = monthly rewards * 12
-                # Staked amount per participant = total staked supply / number of participants
-                # Note: staking_supply[t] will be calculated later, so we need to calculate it here
-                circulating_before_locking = (
-                    self.team_vested[t] + 
-                    self.investor_vested[t] + 
-                    self.foundation_vested[t] + 
-                    self.cumulative_emissions[t] - 
-                    np.sum(self.burn[:t+1])
-                )
-                current_staking_supply = circulating_before_locking * self.staking_percentage
-                
-                if current_staking_supply > 0:
-                    staked_amount_per_participant = current_staking_supply / self.staking_participants
-                    annual_rewards_per_participant = self.per_staker_rewards[t] * 12
-                    self.staking_apy[t] = (annual_rewards_per_participant / staked_amount_per_participant) * 100
+                # Calculate APY based on actual rewards given and actual staked amount
+                if actual_staked_amount > 0:
+                    # APY = (monthly rewards / staked amount) * 12 * 100
+                    self.staking_apy[t] = (self.staking_rewards[t] / actual_staked_amount) * 12 * 100
                 else:
                     self.staking_apy[t] = 0
             else:
@@ -530,14 +582,7 @@ class BitRobotSupplyModel:
             self.locked_collateral[t] = self._calculate_locked_collateral(t)
             self.cumulative_locked_collateral[t] = self.locked_collateral[t]  # This is the current total locked, not cumulative
             
-            # Calculate circulating supply before locking
-            circulating_before_locking = (
-                self.team_vested[t] + 
-                self.investor_vested[t] + 
-                self.foundation_vested[t] + 
-                self.cumulative_emissions[t] - 
-                np.sum(self.burn[:t+1])
-            )
+            # Use the circulating supply before locking that was calculated earlier for staking
             
             # Update staking tracking - now based on circulating supply before locking
             self.staking_supply[t] = circulating_before_locking * self.staking_percentage
@@ -597,6 +642,13 @@ class BitRobotSupplyModel:
             'Staking Rewards': self.staking_rewards,
             'Subnet Rewards': self.subnet_rewards,
             'Per Staker Rewards': self.per_staker_rewards,
-            'Staking APY': self.staking_apy
+            'Staking APY': self.staking_apy,
+            # New staking mechanism tracking data
+            'Target Staking Budget': self.target_staking_budget,
+            'Actual Staking Budget': self.actual_staking_budget,
+            'Subnet Guaranteed Emissions': self.subnet_guaranteed_emissions,
+            # Additional tracking for deflationary regime
+            'Base Emissions': self.base_emissions,
+            'Additional Staking Emissions': self.additional_staking_emissions
         })
         return df
