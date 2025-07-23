@@ -364,6 +364,16 @@ with tab1:
             key="subnet_min_emissions_pct"
         )
         
+        staking_emissions_cap_pct = st.slider(
+            "Staking Emissions Cap (%)", 
+            value=10.0,
+            min_value=1.0,
+            max_value=50.0,
+            step=1.0,
+            help="Maximum percentage of average burn for staking emissions after month 48 (ensures deflationary behavior)",
+            key="staking_emissions_cap_pct"
+        )
+        
         st.subheader("Scenario Parameters")
         
         # Shared starting parameters
@@ -550,7 +560,8 @@ with tab1:
                 'staking_percentage': st.session_state.staking_percentage / 100.0,
                 'target_staking_percentage': st.session_state.target_staking_percentage / 100.0,
                 'target_staking_apy': st.session_state.target_staking_apy / 100.0,
-                'subnet_min_emissions_pct': st.session_state.subnet_min_emissions_pct / 100.0
+                'subnet_min_emissions_pct': st.session_state.subnet_min_emissions_pct / 100.0,
+                'staking_emissions_cap_pct': st.session_state.staking_emissions_cap_pct / 100.0
             }
             
             # Bear scenario (lower growth)
@@ -706,6 +717,246 @@ with tab1:
         # Add vertical line at month 48
         net_flow_chart = alt.layer(net_flow_chart, rule)
         
+        # Plot 2.5: Comprehensive Supply Flow (including net locking/unlocking)
+        comprehensive_flow_data = []
+        for i, month in enumerate(results_df['Month']):
+            # Calculate monthly changes in locked supply
+            if i == 0:
+                collateral_change = results_df['Locked Collateral'].iloc[i]
+                staking_change = results_df['Staking Supply'].iloc[i]
+            else:
+                collateral_change = results_df['Locked Collateral'].iloc[i] - results_df['Locked Collateral'].iloc[i-1]
+                staking_change = results_df['Staking Supply'].iloc[i] - results_df['Staking Supply'].iloc[i-1]
+            
+            total_locking_change = collateral_change + staking_change
+            
+            comprehensive_flow_data.append({
+                'Month': month,
+                'Type': 'Emissions',
+                'Amount': results_df['Emissions'].iloc[i] / 1e6
+            })
+            comprehensive_flow_data.append({
+                'Month': month,
+                'Type': 'Burn',
+                'Amount': results_df['Burn'].iloc[i] / 1e6
+            })
+            comprehensive_flow_data.append({
+                'Month': month,
+                'Type': 'Net Locking Change',
+                'Amount': total_locking_change / 1e6
+            })
+            comprehensive_flow_data.append({
+                'Month': month,
+                'Type': 'Net Circulating Change',
+                'Amount': (results_df['Emissions'].iloc[i] - results_df['Burn'].iloc[i] - total_locking_change) / 1e6
+            })
+        comprehensive_flow_data = pd.DataFrame(comprehensive_flow_data)
+        
+        comprehensive_flow_chart = alt.Chart(comprehensive_flow_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Amount:Q', title='BRB (Millions)'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Emissions', 'Burn', 'Net Locking Change', 'Net Circulating Change'],
+                range=['#2ca02c', '#d62728', '#ff7f0e', '#9467bd']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Net Circulating Change',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
+        ).properties(
+            title='Comprehensive Supply Flow (Including Locking/Unlocking)',
+            width=400,
+            height=350
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at month 48
+        comprehensive_flow_chart = alt.layer(comprehensive_flow_chart, rule)
+        
+        # Create yearly aggregated version of comprehensive supply flow
+        def create_yearly_comprehensive_flow(results_df):
+            """Create yearly aggregated comprehensive supply flow data."""
+            yearly_flow_data = []
+            
+            # Group by year (every 12 months)
+            for year in range(0, len(results_df) // 12 + 1):
+                start_month = year * 12
+                end_month = min((year + 1) * 12, len(results_df))
+                
+                if start_month >= len(results_df):
+                    break
+                
+                year_data = results_df.iloc[start_month:end_month]
+                
+                # Calculate yearly totals
+                yearly_emissions = year_data['Emissions'].sum() / 1e6
+                yearly_burn = year_data['Burn'].sum() / 1e6
+                
+                # Calculate yearly locking changes
+                if start_month == 0:
+                    # For year 0, use the final values
+                    collateral_change = year_data['Locked Collateral'].iloc[-1] - 0
+                    staking_change = year_data['Staking Supply'].iloc[-1] - 0
+                else:
+                    # For other years, calculate the change from start to end
+                    collateral_change = year_data['Locked Collateral'].iloc[-1] - results_df['Locked Collateral'].iloc[start_month - 1]
+                    staking_change = year_data['Staking Supply'].iloc[-1] - results_df['Staking Supply'].iloc[start_month - 1]
+                
+                yearly_locking_change = (collateral_change + staking_change) / 1e6  # Convert to millions
+                yearly_circulating_change = yearly_emissions - yearly_burn - yearly_locking_change
+                
+                yearly_flow_data.append({
+                    'Year': year,
+                    'Type': 'Emissions',
+                    'Amount': yearly_emissions
+                })
+                yearly_flow_data.append({
+                    'Year': year,
+                    'Type': 'Burn',
+                    'Amount': yearly_burn
+                })
+                yearly_flow_data.append({
+                    'Year': year,
+                    'Type': 'Net Locking Change',
+                    'Amount': yearly_locking_change
+                })
+                yearly_flow_data.append({
+                    'Year': year,
+                    'Type': 'Net Circulating Change',
+                    'Amount': yearly_circulating_change
+                })
+            
+            return pd.DataFrame(yearly_flow_data)
+        
+        # Create yearly aggregated data
+        yearly_comprehensive_flow_data = create_yearly_comprehensive_flow(results_df)
+        
+        # Create yearly aggregated chart
+        yearly_comprehensive_flow_chart = alt.Chart(yearly_comprehensive_flow_data).mark_line().encode(
+            x=alt.X('Year:Q', title='Year'),
+            y=alt.Y('Amount:Q', title='BRB (Millions)'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Emissions', 'Burn', 'Net Locking Change', 'Net Circulating Change'],
+                range=['#2ca02c', '#d62728', '#ff7f0e', '#9467bd']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Net Circulating Change',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
+        ).properties(
+            title='Yearly Comprehensive Supply Flow',
+            width=400,
+            height=350
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at year 4 (month 48)
+        yearly_rule = alt.Chart(pd.DataFrame({'x': [4]})).mark_rule(
+            strokeDash=[5, 5],
+            color='gray',
+            strokeWidth=2
+        ).encode(x='x:Q')
+        
+        yearly_comprehensive_flow_chart = alt.layer(yearly_comprehensive_flow_chart, yearly_rule)
+        
+        # Plot 2.6: Locking Components Breakdown
+        locking_components_data = []
+        for i, month in enumerate(results_df['Month']):
+            # Calculate monthly changes in locked supply
+            if i == 0:
+                collateral_change = results_df['Locked Collateral'].iloc[i]
+                staking_change = results_df['Staking Supply'].iloc[i]
+            else:
+                collateral_change = results_df['Locked Collateral'].iloc[i] - results_df['Locked Collateral'].iloc[i-1]
+                staking_change = results_df['Staking Supply'].iloc[i] - results_df['Staking Supply'].iloc[i-1]
+            
+            locking_components_data.append({
+                'Month': month,
+                'Type': 'Collateral Change',
+                'Amount': collateral_change / 1e6
+            })
+            locking_components_data.append({
+                'Month': month,
+                'Type': 'Staking Change',
+                'Amount': staking_change / 1e6
+            })
+            locking_components_data.append({
+                'Month': month,
+                'Type': 'Total Locking Change',
+                'Amount': (collateral_change + staking_change) / 1e6
+            })
+        locking_components_data = pd.DataFrame(locking_components_data)
+        
+        locking_components_chart = alt.Chart(locking_components_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Amount:Q', title='BRB (Millions)'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Collateral Change', 'Staking Change', 'Total Locking Change'],
+                range=['#ff7f0e', '#ff69b4', '#9467bd']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Total Locking Change',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
+        ).properties(
+            title='Locking Components Breakdown',
+            width=400,
+            height=350
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at month 48
+        locking_components_chart = alt.layer(locking_components_chart, rule)
+        
+        # Plot 2.7: Circulating Supply Over Time
+        circulating_supply_data = []
+        for i, month in enumerate(results_df['Month']):
+            circulating_supply_data.append({
+                'Month': month,
+                'Type': 'Circulating Supply',
+                'Amount': results_df['Circulating Supply'].iloc[i] / 1e9
+            })
+            circulating_supply_data.append({
+                'Month': month,
+                'Type': 'Total Locked Supply',
+                'Amount': results_df['Total Locked Supply'].iloc[i] / 1e9
+            })
+            circulating_supply_data.append({
+                'Month': month,
+                'Type': 'Total Supply',
+                'Amount': (results_df['Circulating Supply'].iloc[i] + results_df['Total Locked Supply'].iloc[i]) / 1e9
+            })
+        circulating_supply_data = pd.DataFrame(circulating_supply_data)
+        
+        circulating_supply_chart = alt.Chart(circulating_supply_data).mark_line().encode(
+            x=alt.X('Month:Q', title='Month'),
+            y=alt.Y('Amount:Q', title='BRB (Billions)'),
+            color=alt.Color('Type:N', scale=alt.Scale(
+                domain=['Circulating Supply', 'Total Locked Supply', 'Total Supply'],
+                range=['#2ca02c', '#ff7f0e', '#9467bd']
+            )),
+            strokeDash=alt.condition(
+                alt.datum.Type == 'Total Supply',
+                alt.value([5, 5]),
+                alt.value([0])
+            )
+        ).properties(
+            title='Circulating Supply Over Time',
+            width=400,
+            height=350
+        ).add_params(
+            alt.selection_interval(bind='scales')
+        )
+        
+        # Add vertical line at month 48
+        circulating_supply_chart = alt.layer(circulating_supply_chart, rule)
+        
         # Plot 3: Cumulative Supply - properly structured
         cumulative_data = []
         for i, month in enumerate(results_df['Month']):
@@ -790,7 +1041,7 @@ with tab1:
             height=350
         )
         
-        # Display charts in a 2x2 grid
+        # Display charts in a 2x4 grid (7 charts total)
         col1, col2 = st.columns(2)
         
         with col1:
@@ -802,10 +1053,28 @@ with tab1:
         col3, col4 = st.columns(2)
         
         with col3:
-            st.altair_chart(cumulative_chart, use_container_width=True)
+            st.altair_chart(comprehensive_flow_chart, use_container_width=True)
         
         with col4:
+            st.altair_chart(locking_components_chart, use_container_width=True)
+        
+        col5, col6 = st.columns(2)
+        
+        with col5:
+            st.altair_chart(circulating_supply_chart, use_container_width=True)
+        
+        with col6:
+            st.altair_chart(cumulative_chart, use_container_width=True)
+        
+        col7, col8 = st.columns(2)
+        
+        with col7:
             st.altair_chart(pie_chart, use_container_width=True)
+        
+        with col8:
+            st.altair_chart(yearly_comprehensive_flow_chart, use_container_width=True)
+        
+
         
         # Display summary statistics
         st.subheader("Summary Statistics")
@@ -2199,6 +2468,92 @@ with tab3:
                 file_name=f"bitrobot_bull_scenario_yearly_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv",
                 help="Download Bull scenario yearly aggregate data with annual totals and averages."
+            )
+        
+        # 1.5. Yearly Comprehensive Supply Flow Downloads
+        st.subheader("📊 Download Yearly Comprehensive Supply Flow Data")
+        st.markdown("Yearly aggregated comprehensive supply flow data for each scenario.")
+        
+        # Create a more detailed yearly dataset for download
+        def create_detailed_yearly_flow(results_df):
+            """Create detailed yearly comprehensive supply flow data for download."""
+            detailed_yearly_data = []
+            
+            for year in range(0, len(results_df) // 12 + 1):
+                start_month = year * 12
+                end_month = min((year + 1) * 12, len(results_df))
+                
+                if start_month >= len(results_df):
+                    break
+                
+                year_data = results_df.iloc[start_month:end_month]
+                
+                # Calculate yearly totals
+                yearly_emissions = year_data['Emissions'].sum() / 1e6
+                yearly_burn = year_data['Burn'].sum() / 1e6
+                
+                # Calculate yearly locking changes
+                if start_month == 0:
+                    collateral_change = year_data['Locked Collateral'].iloc[-1] - 0
+                    staking_change = year_data['Staking Supply'].iloc[-1] - 0
+                else:
+                    collateral_change = year_data['Locked Collateral'].iloc[-1] - results_df['Locked Collateral'].iloc[start_month - 1]
+                    staking_change = year_data['Staking Supply'].iloc[-1] - results_df['Staking Supply'].iloc[start_month - 1]
+                
+                yearly_locking_change = (collateral_change + staking_change) / 1e6  # Convert to millions
+                yearly_circulating_change = yearly_emissions - yearly_burn - yearly_locking_change
+                
+                # Add additional metrics
+                avg_circulating_supply = year_data['Circulating Supply'].mean() / 1e6
+                end_circulating_supply = year_data['Circulating Supply'].iloc[-1] / 1e6
+                total_fees = year_data['Total Fees'].sum() / 1e6
+                
+                detailed_yearly_data.append({
+                    'Year': year,
+                    'Emissions (M BRB)': round(yearly_emissions, 2),
+                    'Burn (M BRB)': round(yearly_burn, 2),
+                    'Net Locking Change (M BRB)': round(yearly_locking_change, 2),
+                    'Net Circulating Change (M BRB)': round(yearly_circulating_change, 2),
+                    'Avg Circulating Supply (M BRB)': round(avg_circulating_supply, 2),
+                    'End Circulating Supply (M BRB)': round(end_circulating_supply, 2),
+                    'Total Fees (M BRB)': round(total_fees, 2)
+                })
+            
+            return pd.DataFrame(detailed_yearly_data)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            bear_yearly_flow = create_detailed_yearly_flow(scenario_data['bear'])
+            bear_yearly_flow_csv = bear_yearly_flow.to_csv(index=False)
+            st.download_button(
+                label="🐻 Bear Scenario (Yearly Flow)",
+                data=bear_yearly_flow_csv,
+                file_name=f"bitrobot_bear_yearly_comprehensive_flow_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bear scenario yearly comprehensive supply flow data including emissions, burn, locking changes, and circulating supply changes."
+            )
+        
+        with col2:
+            neutral_yearly_flow = create_detailed_yearly_flow(scenario_data['neutral'])
+            neutral_yearly_flow_csv = neutral_yearly_flow.to_csv(index=False)
+            st.download_button(
+                label="⚖️ Neutral Scenario (Yearly Flow)",
+                data=neutral_yearly_flow_csv,
+                file_name=f"bitrobot_neutral_yearly_comprehensive_flow_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Neutral scenario yearly comprehensive supply flow data including emissions, burn, locking changes, and circulating supply changes."
+            )
+        
+        with col3:
+            bull_yearly_flow = create_detailed_yearly_flow(scenario_data['bull'])
+            bull_yearly_flow_csv = bull_yearly_flow.to_csv(index=False)
+            st.download_button(
+                label="🐂 Bull Scenario (Yearly Flow)",
+                data=bull_yearly_flow_csv,
+                file_name=f"bitrobot_bull_yearly_comprehensive_flow_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                help="Download Bull scenario yearly comprehensive supply flow data including emissions, burn, locking changes, and circulating supply changes."
             )
         
         # 2. Comprehensive Comparison CSV
