@@ -48,6 +48,7 @@ class BitRobotSupplyModel:
                  staking_participants=1000,  # New parameter: number of staking participants
                  target_staking_apy=0.04,  # Target APY for stakers (4% per year)
                  subnet_min_emissions_pct=0.8,  # Minimum percentage of emissions guaranteed to subnets
+                 staking_emissions_cap_pct=0.1,  # Maximum percentage of average burn for staking emissions (default: 10%)
                  alpha=0.5,
                  eta=0.5,
                  gamma=1.0,
@@ -99,6 +100,7 @@ class BitRobotSupplyModel:
         - staking_participants: Number of staking participants (default: 1000)
         - target_staking_apy: Target APY for stakers (default: 0.04 = 4% per year)
         - subnet_min_emissions_pct: Minimum percentage of emissions guaranteed to subnets (default: 0.8)
+        - staking_emissions_cap_pct: Maximum percentage of average burn for staking emissions (default: 0.1 = 10%)
         - alpha, eta, gamma, delta, kappa: Fee model parameters (defaults: 0.5, 0.5, 1.0, 1.0, 0.05)
         - random_seed: Random seed for reproducibility (default: 42)
         
@@ -162,6 +164,7 @@ class BitRobotSupplyModel:
         self.staking_participants = staking_participants
         self.target_staking_apy = target_staking_apy
         self.subnet_min_emissions_pct = subnet_min_emissions_pct
+        self.staking_emissions_cap_pct = staking_emissions_cap_pct
         self.alpha = alpha
         self.eta = eta
         self.gamma = gamma
@@ -419,7 +422,7 @@ class BitRobotSupplyModel:
 
         # Maintenance fees for subnets - using percentage of subnet rewards (not total emissions)
         R_e = self.subnet_rewards[t] / max(len(self.subnet_registry), 1)  # Rewards per subnet
-        print(self.subnet_maintenance_fee_pct)
+        # print(self.subnet_maintenance_fee_pct)
         fee_subnet_maint = len(self.subnet_registry) * R_e * self.subnet_maintenance_fee_pct
 
         total_fees = fee_ent + fee_subnet_reg + fee_subnet_maint
@@ -536,8 +539,17 @@ class BitRobotSupplyModel:
                 self.subnet_rewards[t] = self.base_emissions[t]
                 self.subnet_guaranteed_emissions[t] = self.base_emissions[t]
                 
-                # Mint additional tokens for staking rewards to achieve target APY
-                self.additional_staking_emissions[t] = self.actual_staking_budget[t]
+                # Calculate cap for additional staking emissions based on average burn
+                if t >= self.burn_lookback_months:
+                    burn_sum = np.sum(self.burn[t-self.burn_lookback_months:t])
+                    average_monthly_burn = burn_sum / self.burn_lookback_months
+                    staking_emissions_cap = average_monthly_burn * self.staking_emissions_cap_pct
+                else:
+                    # If we don't have enough burn history yet, use a conservative cap
+                    staking_emissions_cap = self.base_emissions[t] * self.staking_emissions_cap_pct
+                
+                # Mint additional tokens for staking rewards, but cap to maintain deflationary behavior
+                self.additional_staking_emissions[t] = min(self.actual_staking_budget[t], staking_emissions_cap)
                 self.staking_rewards[t] = self.additional_staking_emissions[t]
             
             # Total emissions = base emissions + additional staking emissions
