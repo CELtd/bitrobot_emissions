@@ -7,5 +7,5 @@ gcloud run deploy bitrobot-emissions \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --min-instances=1 \
+  --min-instances=0 \
   --port=8501
