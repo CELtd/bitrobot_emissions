@@ -88,6 +88,8 @@ class RoboSupplyModel:
             linear_total_emissions=200_000_000,
             dynamic_staking_fees=False,  # New parameter for fee-funded staking
             max_maintenance_fee_pct=0.5,  # Maximum maintenance fee percentage (50% default)
+            airdrop_allocation=50_000_000,  # 50M airdrop allocation
+            community_round_allocation=23_000_000,  # 23M community round allocation
         ):
         """
         Initialize the Robo supply model with single-step simulation capability.
@@ -114,6 +116,8 @@ class RoboSupplyModel:
         self.linear_total_emissions = linear_total_emissions
         self.dynamic_staking_fees = dynamic_staking_fees
         self.max_maintenance_fee_pct = max_maintenance_fee_pct
+        self.airdrop_allocation = airdrop_allocation
+        self.community_round_allocation = community_round_allocation
         
         # Initialize fixed emissions schedule
         self.fixed_emissions = np.zeros(simulation_months + 1)
@@ -145,7 +149,8 @@ class RoboSupplyModel:
         else:
             adjusted_start = self.linear_start_emission
             adjusted_end = self.linear_end_emission
-            
+        print(adjusted_start, adjusted_end)
+        
         for month in range(0, 48):
             emission = adjusted_start + (adjusted_end - adjusted_start) * month / 47
             self.fixed_emissions[month] = emission
@@ -197,6 +202,42 @@ class RoboSupplyModel:
         
         return self.foundation_initial_liquidity + (month * monthly_vesting)
         
+    def _calculate_airdrop_vested(self, month):
+        """Calculate total airdrop tokens vested by given month."""
+        if month >= 48:
+            return self.airdrop_allocation
+        
+        # Linear vesting over 48 months
+        monthly_vesting = self.airdrop_allocation / 48
+        return month * monthly_vesting
+        
+    def _calculate_community_round_vested(self, month):
+        """Calculate total community round tokens vested by given month."""
+        if month >= 48:
+            return self.community_round_allocation
+        
+        # Linear vesting over 48 months
+        monthly_vesting = self.community_round_allocation / 48
+        return month * monthly_vesting
+        
+    def _calculate_airdrop_monthly_emission(self, month):
+        """Calculate airdrop tokens emitted (vested) this month."""
+        if month >= 48:
+            return 0  # No more airdrop emissions after month 48
+        
+        # Linear vesting over 48 months
+        monthly_vesting = self.airdrop_allocation / 48
+        return monthly_vesting
+        
+    def _calculate_community_round_monthly_emission(self, month):
+        """Calculate community round tokens emitted (vested) this month."""
+        if month >= 48:
+            return 0  # No more community round emissions after month 48
+        
+        # Linear vesting over 48 months
+        monthly_vesting = self.community_round_allocation / 48
+        return monthly_vesting
+    
     def _calculate_base_emissions(self, month, burn_emission_factor):
         """Calculate base emissions for the given month."""
         if month < self.t_burn:
@@ -266,6 +307,12 @@ class RoboSupplyModel:
         team_vested = self._calculate_team_vested(month)
         investor_vested = self._calculate_investor_vested(month)
         foundation_vested = self._calculate_foundation_vested(month)
+        airdrop_vested = self._calculate_airdrop_vested(month)
+        community_round_vested = self._calculate_community_round_vested(month)
+        
+        # Calculate monthly emissions for this month
+        airdrop_monthly_emission = self._calculate_airdrop_monthly_emission(month)
+        community_round_monthly_emission = self._calculate_community_round_monthly_emission(month)
         
         # Calculate base emissions
         base_emissions = self._calculate_base_emissions(month, protocol_params['burn_emission_factor'])
@@ -275,6 +322,8 @@ class RoboSupplyModel:
             team_vested + 
             investor_vested + 
             foundation_vested + 
+            airdrop_vested +
+            community_round_vested +
             self.cumulative_emissions - 
             self.cumulative_burn
         )
@@ -349,7 +398,7 @@ class RoboSupplyModel:
                     additional_staking_emissions = target_staking_rewards - fee_vault_distribution
                 staking_rewards = fee_vault_distribution + additional_staking_emissions
         
-        total_emissions = subnet_rewards + additional_staking_emissions
+        total_emissions = subnet_rewards + additional_staking_emissions + airdrop_monthly_emission + community_round_monthly_emission
         
         # Calculate maintenance fees and total fees
         rewards_per_subnet = subnet_rewards / max(self.active_subnets, 1)
@@ -454,6 +503,10 @@ class RoboSupplyModel:
             'team_vested': team_vested,
             'investor_vested': investor_vested,
             'foundation_vested': foundation_vested,
+            'airdrop_vested': airdrop_vested,
+            'community_round_vested': community_round_vested,
+            'airdrop_monthly_emission': airdrop_monthly_emission,
+            'community_round_monthly_emission': community_round_monthly_emission,
             'base_emissions': base_emissions,
             'additional_staking_emissions': additional_staking_emissions,
             'total_emissions': total_emissions,

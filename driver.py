@@ -37,6 +37,8 @@ def sim1(
     linear_start_emission=12_000_000,
     linear_end_emission=2_000_000,
     linear_total_emissions=200_000_000,
+    airdrop_allocation=50_000_000,  # 50M airdrop allocation
+    community_round_allocation=23_000_000,  # 23M community round allocation
 ):
     """
     Run a simulation with Poisson processes for arrivals and lifetime-based departures.
@@ -60,6 +62,8 @@ def sim1(
         linear_start_emission: Initial emission rate in M-ROBO per month
         linear_end_emission: Final emission rate in M-ROBO per month
         linear_total_emissions: Total emissions in M-ROBO
+        airdrop_allocation: Total airdrop allocation in ROBO tokens
+        community_round_allocation: Total community round allocation in ROBO tokens
     """
     # Create random number generator with seed for reproducible results
     rng = np.random.default_rng(seed)
@@ -68,6 +72,8 @@ def sim1(
         linear_start_emission=linear_start_emission,
         linear_end_emission=linear_end_emission,
         linear_total_emissions=linear_total_emissions,
+        airdrop_allocation=airdrop_allocation,
+        community_round_allocation=community_round_allocation,
     )
     
     # Initialize with starting entities and subnets
@@ -183,6 +189,9 @@ def sim2(
     linear_total_emissions=200_000_000,
     dynamic_staking_fees=False,
     max_maintenance_fee_pct=0.5,
+    airdrop_allocation=50_000_000,  # 50M airdrop allocation
+    community_round_allocation=23_000_000,  # 23M community round allocation
+    subnet_maintenance_fee_pct=0.25,
 ):
     """
     Run a simulation with deterministic subnet growth and Poisson processes for entities.
@@ -210,6 +219,11 @@ def sim2(
         linear_start_emission: Initial emission rate in M-ROBO per month
         linear_end_emission: Final emission rate in M-ROBO per month
         linear_total_emissions: Total emissions in M-ROBO
+        dynamic_staking_fees: Whether to use dynamic staking fees
+        max_maintenance_fee_pct: Maximum maintenance fee percentage
+        airdrop_allocation: Total airdrop allocation in ROBO tokens
+        community_round_allocation: Total community round allocation in ROBO tokens
+        subnet_maintenance_fee_pct: Maintenance fee percentage for subnets
     """
     # Create random number generator with seed for reproducible results
     rng = np.random.default_rng(seed)
@@ -220,6 +234,8 @@ def sim2(
         linear_total_emissions=linear_total_emissions,
         dynamic_staking_fees=dynamic_staking_fees,
         max_maintenance_fee_pct=max_maintenance_fee_pct,
+        airdrop_allocation=airdrop_allocation,
+        community_round_allocation=community_round_allocation,
     )
     
     # Initialize with starting entities and subnets
@@ -322,11 +338,11 @@ def sim2(
 
         # Create protocol parameters for this month
         protocol_params = {
-            'ent_registration_fee': 1000,
+            'ent_registration_fee': 100,
             'subnet_registration_fee': 5000,
-            'ent_collateral_amount': 5000,
+            'ent_collateral_amount': 100,
             'subnet_collateral_amount': 100000,
-            'subnet_maintenance_fee_pct': 0.25,
+            'subnet_maintenance_fee_pct': subnet_maintenance_fee_pct,
             'burn_emission_factor': 0.9,  # burn-based emission factor
             'target_staking_apy': current_target_staking_apy,  # Dynamic target staking APY
             'staking_percentage': 0.3,  # 30% of tokens staked
