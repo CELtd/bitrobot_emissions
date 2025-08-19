@@ -67,6 +67,52 @@ def print_yearly_subnet_rewards(df):
 # Usage:
 # yearly_rewards = print_yearly_subnet_rewards(df)
 
+def print_yearly_emissions_percentage(df):
+    """
+    Print yearly emissions as a percentage of total supply from simulation dataframe.
+    
+    Args:
+        df: DataFrame containing simulation results with 'month', 'total_emissions', 
+            'team_vested', 'investor_vested', 'foundation_vested', 'airdrop_vested',
+            'community_round_vested', and 'cumulative_emissions' columns
+    """
+    # Add a year column to the dataframe
+    df_copy = df.copy()
+    df_copy['year'] = (df_copy['month'] // 12) + 1
+    
+    # Group by year and sum the total_emissions
+    yearly_emissions = df_copy.groupby('year')['total_emissions'].sum()
+    
+    # # Calculate total supply for each year (sum of all vested allocations + cumulative emissions)
+    # yearly_total_supply = {}
+    # for year in yearly_emissions.index:
+    #     year_data = df_copy[df_copy['year'] == year]
+    #     # Get the last month of the year to get final vested amounts
+    #     last_month_data = year_data.iloc[-1]
+        
+    #     # Total supply = all vested allocations + cumulative emissions - cumulative burn
+    #     total_supply = (
+    #         last_month_data['team_vested'] +
+    #         last_month_data['investor_vested'] +
+    #         last_month_data['foundation_vested'] +
+    #         last_month_data['airdrop_vested'] +
+    #         last_month_data['community_round_vested'] +
+    #         last_month_data['cumulative_emissions'] -
+    #         last_month_data['cumulative_burn']
+    #     )
+    #     yearly_total_supply[year] = total_supply
+    
+    # Print the results
+    print("Emissions as % of Total Supply by Year:")
+    print("=" * 50)
+    total_supply = 1_000_000_000 - yearly_emissions[yearly_emissions.index[0]]
+    for year in yearly_emissions.index:
+        emissions = yearly_emissions[year]
+        total_supply += emissions
+        percentage = (emissions / total_supply) * 100
+        print(f"Year {year}: {emissions:,.0f} ROBO / {total_supply:,.0f} ROBO = {percentage:.2f}%")
+    
+
 class RoboSupplyModel:
     def __init__(
             self,
