@@ -135,7 +135,9 @@ class RoboSupplyModel:
             dynamic_staking_fees=False,  # New parameter for fee-funded staking
             max_maintenance_fee_pct=0.5,  # Maximum maintenance fee percentage (50% default)
             airdrop_allocation=50_000_000,  # 50M airdrop allocation
+            airdrop_vesting_months=48,  # Configurable airdrop vesting period (0 for immediate vesting)
             community_round_allocation=23_000_000,  # 23M community round allocation
+            community_round_vesting_months=48,  # Configurable community round vesting period (0 for immediate vesting)
         ):
         """
         Initialize the Robo supply model with single-step simulation capability.
@@ -163,7 +165,9 @@ class RoboSupplyModel:
         self.dynamic_staking_fees = dynamic_staking_fees
         self.max_maintenance_fee_pct = max_maintenance_fee_pct
         self.airdrop_allocation = airdrop_allocation
+        self.airdrop_vesting_months = airdrop_vesting_months
         self.community_round_allocation = community_round_allocation
+        self.community_round_vesting_months = community_round_vesting_months
         
         # Initialize fixed emissions schedule
         self.fixed_emissions = np.zeros(simulation_months + 1)
@@ -250,38 +254,54 @@ class RoboSupplyModel:
         
     def _calculate_airdrop_vested(self, month):
         """Calculate total airdrop tokens vested by given month."""
-        if month >= 48:
+        if self.airdrop_vesting_months == 0:
+            # Immediate vesting
             return self.airdrop_allocation
         
-        # Linear vesting over 48 months
-        monthly_vesting = self.airdrop_allocation / 48
+        if month >= self.airdrop_vesting_months:
+            return self.airdrop_allocation
+        
+        # Linear vesting over configurable period
+        monthly_vesting = self.airdrop_allocation / self.airdrop_vesting_months
         return month * monthly_vesting
         
     def _calculate_community_round_vested(self, month):
         """Calculate total community round tokens vested by given month."""
-        if month >= 48:
+        if self.community_round_vesting_months == 0:
+            # Immediate vesting
             return self.community_round_allocation
         
-        # Linear vesting over 48 months
-        monthly_vesting = self.community_round_allocation / 48
+        if month >= self.community_round_vesting_months:
+            return self.community_round_allocation
+        
+        # Linear vesting over configurable period
+        monthly_vesting = self.community_round_allocation / self.community_round_vesting_months
         return month * monthly_vesting
         
     def _calculate_airdrop_monthly_emission(self, month):
         """Calculate airdrop tokens emitted (vested) this month."""
-        if month >= 48:
-            return 0  # No more airdrop emissions after month 48
+        if self.airdrop_vesting_months == 0:
+            # Immediate vesting - all tokens emitted in month 0
+            return self.airdrop_allocation if month == 0 else 0
         
-        # Linear vesting over 48 months
-        monthly_vesting = self.airdrop_allocation / 48
+        if month >= self.airdrop_vesting_months:
+            return 0  # No more airdrop emissions after vesting period
+        
+        # Linear vesting over configurable period
+        monthly_vesting = self.airdrop_allocation / self.airdrop_vesting_months
         return monthly_vesting
         
     def _calculate_community_round_monthly_emission(self, month):
         """Calculate community round tokens emitted (vested) this month."""
-        if month >= 48:
-            return 0  # No more community round emissions after month 48
+        if self.community_round_vesting_months == 0:
+            # Immediate vesting - all tokens emitted in month 0
+            return self.community_round_allocation if month == 0 else 0
         
-        # Linear vesting over 48 months
-        monthly_vesting = self.community_round_allocation / 48
+        if month >= self.community_round_vesting_months:
+            return 0  # No more community round emissions after vesting period
+        
+        # Linear vesting over configurable period
+        monthly_vesting = self.community_round_allocation / self.community_round_vesting_months
         return monthly_vesting
     
     def _calculate_base_emissions(self, month, burn_emission_factor):

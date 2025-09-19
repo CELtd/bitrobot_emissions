@@ -191,6 +191,8 @@ def sim2(
     max_maintenance_fee_pct=0.5,
     airdrop_allocation=50_000_000,  # 50M airdrop allocation
     community_round_allocation=23_000_000,  # 23M community round allocation
+    airdrop_vesting_months=0, 
+    community_round_vesting_months=0,
     subnet_maintenance_fee_pct=0.25,
 ):
     """
@@ -224,6 +226,8 @@ def sim2(
         airdrop_allocation: Total airdrop allocation in ROBO tokens
         community_round_allocation: Total community round allocation in ROBO tokens
         subnet_maintenance_fee_pct: Maintenance fee percentage for subnets
+        airdrop_vesting_months: Number of months to vest the airdrop allocation
+        community_round_vesting_months: Number of months to vest the community round allocation
     """
     # Create random number generator with seed for reproducible results
     rng = np.random.default_rng(seed)
@@ -236,6 +240,8 @@ def sim2(
         max_maintenance_fee_pct=max_maintenance_fee_pct,
         airdrop_allocation=airdrop_allocation,
         community_round_allocation=community_round_allocation,
+        airdrop_vesting_months=airdrop_vesting_months,
+        community_round_vesting_months=community_round_vesting_months,
     )
     
     # Initialize with starting entities and subnets
