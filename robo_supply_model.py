@@ -72,7 +72,7 @@ def print_yearly_emissions_percentage(df):
     Print yearly emissions as a percentage of total supply from simulation dataframe.
     
     Args:
-        df: DataFrame containing simulation results with 'month', 'total_emissions', 
+        df: DataFrame containing simulation results with 'month', 'subnet_rewards', 
             'team_vested', 'investor_vested', 'foundation_vested', 'airdrop_vested',
             'community_round_vested', and 'cumulative_emissions' columns
     """
@@ -83,25 +83,6 @@ def print_yearly_emissions_percentage(df):
     # Group by year and sum the total_emissions
     yearly_emissions = df_copy.groupby('year')['total_emissions'].sum()
     
-    # # Calculate total supply for each year (sum of all vested allocations + cumulative emissions)
-    # yearly_total_supply = {}
-    # for year in yearly_emissions.index:
-    #     year_data = df_copy[df_copy['year'] == year]
-    #     # Get the last month of the year to get final vested amounts
-    #     last_month_data = year_data.iloc[-1]
-        
-    #     # Total supply = all vested allocations + cumulative emissions - cumulative burn
-    #     total_supply = (
-    #         last_month_data['team_vested'] +
-    #         last_month_data['investor_vested'] +
-    #         last_month_data['foundation_vested'] +
-    #         last_month_data['airdrop_vested'] +
-    #         last_month_data['community_round_vested'] +
-    #         last_month_data['cumulative_emissions'] -
-    #         last_month_data['cumulative_burn']
-    #     )
-    #     yearly_total_supply[year] = total_supply
-    
     # Print the results
     print("Emissions as % of Total Supply by Year:")
     print("=" * 50)
@@ -111,6 +92,8 @@ def print_yearly_emissions_percentage(df):
         total_supply += emissions
         percentage = (emissions / total_supply) * 100
         print(f"Year {year}: {emissions:,.0f} ROBO / {total_supply:,.0f} ROBO = {percentage:.2f}%")
+
+    return df_copy
     
 
 class RoboSupplyModel:
@@ -252,57 +235,45 @@ class RoboSupplyModel:
         
         return self.foundation_initial_liquidity + (month * monthly_vesting)
         
-    def _calculate_airdrop_vested(self, month):
-        """Calculate total airdrop tokens vested by given month."""
+    def _calculate_airdrop_release(self, month):
+        """Calculate airdrop tokens released this month (minted at TGE, released over time)."""
         if self.airdrop_vesting_months == 0:
-            # Immediate vesting
-            return self.airdrop_allocation
-        
-        if month >= self.airdrop_vesting_months:
-            return self.airdrop_allocation
-        
-        # Linear vesting over configurable period
-        monthly_vesting = self.airdrop_allocation / self.airdrop_vesting_months
-        return month * monthly_vesting
-        
-    def _calculate_community_round_vested(self, month):
-        """Calculate total community round tokens vested by given month."""
-        if self.community_round_vesting_months == 0:
-            # Immediate vesting
-            return self.community_round_allocation
-        
-        if month >= self.community_round_vesting_months:
-            return self.community_round_allocation
-        
-        # Linear vesting over configurable period
-        monthly_vesting = self.community_round_allocation / self.community_round_vesting_months
-        return month * monthly_vesting
-        
-    def _calculate_airdrop_monthly_emission(self, month):
-        """Calculate airdrop tokens emitted (vested) this month."""
-        if self.airdrop_vesting_months == 0:
-            # Immediate vesting - all tokens emitted in month 0
+            # Immediate release - all tokens released in month 0
             return self.airdrop_allocation if month == 0 else 0
         
         if month >= self.airdrop_vesting_months:
-            return 0  # No more airdrop emissions after vesting period
+            return 0  # No more airdrop releases after vesting period
         
-        # Linear vesting over configurable period
-        monthly_vesting = self.airdrop_allocation / self.airdrop_vesting_months
-        return monthly_vesting
+        # Linear release over configurable period
+        monthly_release = self.airdrop_allocation / self.airdrop_vesting_months
+        return monthly_release
         
-    def _calculate_community_round_monthly_emission(self, month):
-        """Calculate community round tokens emitted (vested) this month."""
+    def _calculate_community_round_release(self, month):
+        """Calculate community round tokens released this month (minted at TGE, released over time)."""
         if self.community_round_vesting_months == 0:
-            # Immediate vesting - all tokens emitted in month 0
+            # Immediate release - all tokens released in month 0
             return self.community_round_allocation if month == 0 else 0
         
         if month >= self.community_round_vesting_months:
-            return 0  # No more community round emissions after vesting period
+            return 0  # No more community round releases after vesting period
         
-        # Linear vesting over configurable period
-        monthly_vesting = self.community_round_allocation / self.community_round_vesting_months
-        return monthly_vesting
+        # Linear release over configurable period
+        monthly_release = self.community_round_allocation / self.community_round_vesting_months
+        return monthly_release
+    
+    def _calculate_airdrop_released_cumulative(self, month):
+        """Calculate total airdrop tokens released by given month."""
+        total_released = 0
+        for m in range(month + 1):
+            total_released += self._calculate_airdrop_release(m)
+        return total_released
+        
+    def _calculate_community_round_released_cumulative(self, month):
+        """Calculate total community round tokens released by given month."""
+        total_released = 0
+        for m in range(month + 1):
+            total_released += self._calculate_community_round_release(m)
+        return total_released
     
     def _calculate_base_emissions(self, month, burn_emission_factor):
         """Calculate base emissions for the given month."""
@@ -373,23 +344,26 @@ class RoboSupplyModel:
         team_vested = self._calculate_team_vested(month)
         investor_vested = self._calculate_investor_vested(month)
         foundation_vested = self._calculate_foundation_vested(month)
-        airdrop_vested = self._calculate_airdrop_vested(month)
-        community_round_vested = self._calculate_community_round_vested(month)
+        # Calculate airdrop and community round releases for this month
+        airdrop_monthly_release = self._calculate_airdrop_release(month)
+        community_round_monthly_release = self._calculate_community_round_release(month)
         
-        # Calculate monthly emissions for this month
-        airdrop_monthly_emission = self._calculate_airdrop_monthly_emission(month)
-        community_round_monthly_emission = self._calculate_community_round_monthly_emission(month)
+        # Calculate cumulative releases
+        airdrop_released = self._calculate_airdrop_released_cumulative(month)
+        community_round_released = self._calculate_community_round_released_cumulative(month)
         
         # Calculate base emissions
         base_emissions = self._calculate_base_emissions(month, protocol_params['burn_emission_factor'])
         
         # Calculate circulating supply before locking
+        # Note: airdrop and community_round tokens are minted at TGE but released over time
+        # So we use the released amounts, not the allocated amounts
         circulating_before_locking = (
             team_vested + 
             investor_vested + 
             foundation_vested + 
-            airdrop_vested +
-            community_round_vested +
+            airdrop_released +
+            community_round_released +
             self.cumulative_emissions - 
             self.cumulative_burn
         )
@@ -464,7 +438,7 @@ class RoboSupplyModel:
                     additional_staking_emissions = target_staking_rewards - fee_vault_distribution
                 staking_rewards = fee_vault_distribution + additional_staking_emissions
         
-        total_emissions = subnet_rewards + additional_staking_emissions + airdrop_monthly_emission + community_round_monthly_emission
+        total_emissions = subnet_rewards + additional_staking_emissions
         
         # Calculate maintenance fees and total fees
         rewards_per_subnet = subnet_rewards / max(self.active_subnets, 1)
@@ -569,10 +543,10 @@ class RoboSupplyModel:
             'team_vested': team_vested,
             'investor_vested': investor_vested,
             'foundation_vested': foundation_vested,
-            'airdrop_vested': airdrop_vested,
-            'community_round_vested': community_round_vested,
-            'airdrop_monthly_emission': airdrop_monthly_emission,
-            'community_round_monthly_emission': community_round_monthly_emission,
+            'airdrop_released': airdrop_released,
+            'community_round_released': community_round_released,
+            'airdrop_monthly_release': airdrop_monthly_release,
+            'community_round_monthly_release': community_round_monthly_release,
             'base_emissions': base_emissions,
             'additional_staking_emissions': additional_staking_emissions,
             'total_emissions': total_emissions,
