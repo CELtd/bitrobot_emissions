@@ -103,7 +103,8 @@ class RoboSupplyModel:
             investor_allocation=351_000_000,
             foundation_allocation=307_000_000,
             foundation_initial_liquidity=50_000_000,
-            foundation_target_48m=307_000_000,
+            # foundation_target_48m=307_000_000,
+            foundation_target_48m=280_000_000,
             team_cliff_months=12,
             team_vesting_months=36,  # Changed from 24 to 36 (3 years)
             investor_cliff_months=12,  # Added separate investor cliff
