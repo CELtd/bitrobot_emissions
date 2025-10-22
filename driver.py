@@ -171,7 +171,10 @@ def sim1(
 
 def sim2(
     seed=42,  # random seed for reproducible results
-    initial_ents=100,  # initial number of entities
+    initial_ents=500,  # initial number of entities
+    initial_subnets=10,  # initial number of subnets
+    target_subnets_month_48=30,  # target number of subnets by month 48
+    post_48_subnets_per_year=6,  # subnets added per year after month 48
     ent_arrival_rate=1.0,  # average new entities per month
     ent_lifetime_months=24,  # entities depart after this many months
     subnet_lifetime_months=36,  # subnets depart after this many months
@@ -199,14 +202,17 @@ def sim2(
     Run a simulation with deterministic subnet growth and Poisson processes for entities.
     
     Subnet growth pattern:
-    - Start with 7 subnets
-    - Grow linearly to 20 subnets by month 48
-    - After month 48, increase by 5 subnets every year (every 12 months)
+    - Start with initial_subnets
+    - Grow linearly to target_subnets_month_48 by month 48
+    - After month 48, increase by post_48_subnets_per_year subnets per year
     - When subnets expire, create new ones to maintain target count
     
     Args:
         seed: Random seed for reproducible results
         initial_ents: Initial number of entities on the network
+        initial_subnets: Initial number of subnets on the network
+        target_subnets_month_48: Target number of subnets by month 48
+        post_48_subnets_per_year: Number of subnets added per year after month 48
         ent_arrival_rate: Average number of new entities per month
         ent_lifetime_months: Number of months before entities depart
         subnet_lifetime_months: Number of months before subnets depart
@@ -246,24 +252,29 @@ def sim2(
     
     # Initialize with starting entities and subnets
     entity_cohorts = [(0, initial_ents)]  # [(join_month, count), ...]
-    subnet_cohorts = [(0, 7)]  # Start with 7 subnets
+    subnet_cohorts = [(0, initial_subnets)]  # Start with initial subnets
 
     def get_target_subnet_count(month):
         """Calculate target number of subnets for a given month."""
         if month <= 48:
-            # Linear growth from 7 to 20 over 48 months
-            return 7 + (20 - 7) * (month / 48)
+            # Linear growth from initial_subnets to target_subnets_month_48 over 48 months
+            return initial_subnets + (target_subnets_month_48 - initial_subnets) * (month / 48)
         else:
-            # After month 48, increase by 1 every 2 months (linear growth)
+            # After month 48, increase by post_48_subnets_per_year per year
             months_after_48 = month - 48
-            return 20 + (months_after_48 / 2)
+            return target_subnets_month_48 + (months_after_48 / 12) * post_48_subnets_per_year
 
     for month in range(NUM_MONTHS):
         # Generate Poisson random variables for new entity arrivals
         new_ents = rng.poisson(ent_arrival_rate)
         
+        # For month 0, include the initial entities in new_ents
+        if month == 0:
+            new_ents += initial_ents
+        
         # Add new entity cohorts
-        if new_ents > 0: entity_cohorts.append((month, new_ents))
+        if new_ents > 0 and month > 0:  # Don't double-add initial entities
+            entity_cohorts.append((month, new_ents))
         
         # Calculate entity departures based on lifetime
         ent_departures = 0
@@ -299,10 +310,10 @@ def sim2(
         # Add new subnet cohorts
         if new_subnets > 0: subnet_cohorts.append((month, new_subnets))
         
-        # Special handling for month 0: we need to create the initial 7 subnets
+        # Special handling for month 0: we need to create the initial subnets
         if month == 0:
-            new_subnets = 7  # Create initial 7 subnets
-            subnet_cohorts = [(0, 7)]  # Reset to just the initial cohort
+            new_subnets = initial_subnets  # Create initial subnets
+            subnet_cohorts = [(0, initial_subnets)]  # Reset to just the initial cohort
         
         # Calculate total licensing revenue based on subnet cohorts
         total_licensing_revenue = 0

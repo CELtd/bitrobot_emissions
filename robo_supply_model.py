@@ -67,6 +67,41 @@ def print_yearly_subnet_rewards(df):
 # Usage:
 # yearly_rewards = print_yearly_subnet_rewards(df)
 
+def print_yearly_subnet_rewards_table(df):
+    """
+    Print yearly subnet rewards in a table format.
+    
+    Args:
+        df: DataFrame containing simulation results with 'month', 'base_emissions', 
+            'token_price', and 'active_subnets' columns
+    """
+    # Add a year column to the dataframe
+    df_copy = df.copy()
+    df_copy['year'] = (df_copy['month'] // 12) + 1
+    
+    # Group by year and sum the base_emissions (subnet rewards)
+    yearly_subnet_rewards = df_copy.groupby('year')['base_emissions'].sum()
+    
+    # Print table header
+    print("\nAverage Per-Subnet Rewards by Year")
+    print("=" * 80)
+    print(f"{'Year':<6} {'Avg Subnets':<15} {'ROBO per Subnet':<25} {'USD per Subnet':<25}")
+    print("-" * 80)
+    
+    # Print data for each year
+    for year in yearly_subnet_rewards.index:
+        year_data = df_copy[df_copy['year'] == year]
+        total_rewards = yearly_subnet_rewards[year]
+        avg_active_subnets = year_data['active_subnets'].mean()
+        per_subnet_rewards = total_rewards / avg_active_subnets if avg_active_subnets > 0 else 0
+        # Calculate weighted average token price for the year
+        weighted_avg_price = (year_data['base_emissions'] * year_data['token_price']).sum() / year_data['base_emissions'].sum()
+        per_subnet_usd = per_subnet_rewards * weighted_avg_price
+        
+        print(f"{year:<6} {avg_active_subnets:<15.1f} {per_subnet_rewards:>20,.0f} ROBO {per_subnet_usd:>20,.0f} USD")
+    
+    print("=" * 80)
+
 def print_yearly_emissions_percentage(df):
     """
     Print yearly emissions as a percentage of total supply from simulation dataframe.
@@ -86,12 +121,13 @@ def print_yearly_emissions_percentage(df):
     # Print the results
     print("Emissions as % of Total Supply by Year:")
     print("=" * 50)
-    total_supply = 1_000_000_000 - yearly_emissions[yearly_emissions.index[0]]
+    total_supply = 1_000_000_000  # Start with 1B tokens at TGE
     for year in yearly_emissions.index:
         emissions = yearly_emissions[year]
-        total_supply += emissions
-        percentage = (emissions / total_supply) * 100
-        print(f"Year {year}: {emissions:,.0f} ROBO / {total_supply:,.0f} ROBO = {percentage:.2f}%")
+        end_of_year_supply = total_supply + emissions
+        percentage = (emissions / end_of_year_supply) * 100
+        print(f"Year {year}: {emissions:,.0f} ROBO / {end_of_year_supply:,.0f} ROBO = {percentage:.2f}%")
+        total_supply = end_of_year_supply  # Update for next year
 
     return df_copy
     
