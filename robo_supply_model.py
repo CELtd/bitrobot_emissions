@@ -67,40 +67,60 @@ def print_yearly_subnet_rewards(df):
 # Usage:
 # yearly_rewards = print_yearly_subnet_rewards(df)
 
-def print_yearly_subnet_rewards_table(df):
+def print_yearly_subnet_rewards_table(df, units='ROBO'):
     """
     Print yearly subnet rewards in a table format.
+    Shows NET rewards (after maintenance fees are deducted) and protocol capture breakdown.
     
     Args:
-        df: DataFrame containing simulation results with 'month', 'base_emissions', 
-            'token_price', and 'active_subnets' columns
+        df: DataFrame containing simulation results with 'month', 'net_base_emissions', 
+            'token_price', 'active_subnets', 'total_fees', and 'revenue_burn_tokens' columns
+        units: 'ROBO' or 'USD' - which currency units to display (default: 'ROBO')
     """
     # Add a year column to the dataframe
     df_copy = df.copy()
     df_copy['year'] = (df_copy['month'] // 12) + 1
     
-    # Group by year and sum the base_emissions (subnet rewards)
-    yearly_subnet_rewards = df_copy.groupby('year')['base_emissions'].sum()
+    # Group by year and sum the relevant columns
+    # Note: These are NOT cumulative - each year shows only that year's total
+    # Year 1 = sum of months 0-11, Year 2 = sum of months 12-23, etc.
+    yearly_subnet_rewards = df_copy.groupby('year')['net_base_emissions'].sum()
+    yearly_total_fees = df_copy.groupby('year')['total_fees'].sum()
+    yearly_revenue_burn = df_copy.groupby('year')['revenue_burn_tokens'].sum()
+    
+    # Validate units parameter
+    if units not in ['ROBO', 'USD']:
+        raise ValueError("units must be either 'ROBO' or 'USD'")
     
     # Print table header
-    print("\nAverage Per-Subnet Rewards by Year")
-    print("=" * 80)
-    print(f"{'Year':<6} {'Avg Subnets':<15} {'ROBO per Subnet':<25} {'USD per Subnet':<25}")
-    print("-" * 80)
+    print(f"\nAverage Per-Subnet Rewards by Year (NET - After Maintenance Fees) - {units}")
+    print("=" * 110)
+    print(f"{'Year':<6} {'Avg Subnets':<13} {'Per Subnet':<18} {'Fees':<18} {'Revenue Burn':<18} {'Total Capture':<18}")
+    print("-" * 110)
     
     # Print data for each year
     for year in yearly_subnet_rewards.index:
         year_data = df_copy[df_copy['year'] == year]
-        total_rewards = yearly_subnet_rewards[year]
+        total_net_rewards = yearly_subnet_rewards[year]
+        total_fees = yearly_total_fees[year]
+        revenue_burn = yearly_revenue_burn[year]
+        total_capture = total_fees + revenue_burn
         avg_active_subnets = year_data['active_subnets'].mean()
-        per_subnet_rewards = total_rewards / avg_active_subnets if avg_active_subnets > 0 else 0
-        # Calculate weighted average token price for the year
-        weighted_avg_price = (year_data['base_emissions'] * year_data['token_price']).sum() / year_data['base_emissions'].sum()
-        per_subnet_usd = per_subnet_rewards * weighted_avg_price
         
-        print(f"{year:<6} {avg_active_subnets:<15.1f} {per_subnet_rewards:>20,.0f} ROBO {per_subnet_usd:>20,.0f} USD")
+        # Calculate weighted average token price for the year (using net emissions for weighting)
+        weighted_avg_price = (year_data['net_base_emissions'] * year_data['token_price']).sum() / year_data['net_base_emissions'].sum()
+        
+        if units == 'ROBO':
+            per_subnet = total_net_rewards / avg_active_subnets if avg_active_subnets > 0 else 0
+            print(f"{year:<6} {avg_active_subnets:<13.1f} {per_subnet:>13,.0f} ROBO {total_fees:>13,.0f} ROBO {revenue_burn:>13,.0f} ROBO {total_capture:>13,.0f} ROBO")
+        else:  # USD
+            per_subnet = (total_net_rewards / avg_active_subnets * weighted_avg_price) if avg_active_subnets > 0 else 0
+            fees_usd = total_fees * weighted_avg_price
+            revenue_burn_usd = revenue_burn * weighted_avg_price
+            total_capture_usd = total_capture * weighted_avg_price
+            print(f"{year:<6} {avg_active_subnets:<13.1f} {per_subnet:>14,.0f} USD {fees_usd:>14,.0f} USD {revenue_burn_usd:>14,.0f} USD {total_capture_usd:>14,.0f} USD")
     
-    print("=" * 80)
+    print("=" * 110)
 
 def print_yearly_emissions_percentage(df):
     """
@@ -137,7 +157,6 @@ class RoboSupplyModel:
             self,
             team_allocation=269_000_000,
             investor_allocation=351_000_000,
-            foundation_allocation=307_000_000,
             foundation_initial_liquidity=50_000_000,
             # foundation_target_48m=307_000_000,
             foundation_target_48m=280_000_000,
@@ -168,7 +187,6 @@ class RoboSupplyModel:
         # Store tokenomics parameters
         self.team_allocation = team_allocation
         self.investor_allocation = investor_allocation
-        self.foundation_allocation = foundation_allocation
         self.foundation_initial_liquidity = foundation_initial_liquidity
         self.foundation_target_48m = foundation_target_48m
         self.team_cliff_months = team_cliff_months
@@ -518,6 +536,9 @@ class RoboSupplyModel:
         
         total_fees = ent_registration_fees + subnet_registration_fees + subnet_maintenance_fees
         
+        # Calculate net subnet rewards (after maintenance fees are deducted)
+        net_base_emissions = subnet_rewards - subnet_maintenance_fees
+        
         # Handle selective fee routing: registration fees burned, maintenance fees configurable
         # This implements the desired behavior where:
         # - ENT registration fees are burned (deflationary pressure)
@@ -585,6 +606,7 @@ class RoboSupplyModel:
             'airdrop_monthly_release': airdrop_monthly_release,
             'community_round_monthly_release': community_round_monthly_release,
             'base_emissions': base_emissions,
+            'net_base_emissions': net_base_emissions,
             'additional_staking_emissions': additional_staking_emissions,
             'total_emissions': total_emissions,
             'burn': total_burn,
